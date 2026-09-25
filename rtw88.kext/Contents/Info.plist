@@ -19,10 +19,10 @@
     <string>KEXT</string>
 
     <key>CFBundleShortVersionString</key>
-    <string>1.1.0</string>
+    <string>1.0.4</string>
 
     <key>CFBundleVersion</key>
-    <string>1.1.0</string>
+    <string>1.0.4</string>
 
     <key>CFBundleSignature</key>
     <string>????</string>
@@ -31,7 +31,7 @@
     <string>Copyright 2024 rtw88-macos. GPL-2.0 OR BSD-3-Clause</string>
 
     <key>OSBundleCompatibleVersion</key>
-    <string>1.1.0</string>
+    <string>1.0.4</string>
 
     <key>OSBundleLibraries</key>
     <dict>
