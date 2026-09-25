@@ -1108,11 +1108,32 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
                         (mode & 0x02) ? 1 : 0,
                         (mode & 0x04) ? 1 : 0);
 
-                    /* Walk any Neighbor Report IEs we can identify. Optional
-                     * BSS termination / ESS-disassociation fields can precede
-                     * the candidate list, so this scan is intentionally
-                     * defensive and only accepts complete EID 52 elements. */
-                    for (uint32_t off = 7; off + 2 <= blen; ) {
+                    /* Locate the optional candidate list according to
+                     * 802.11v request-mode flags. Bit 3 adds a 12-byte BSS
+                     * Termination Duration field; bit 4 adds an ESS
+                     * Disassociation Imminent URL (length byte + URL). */
+                    uint32_t candidateOff = 7;
+                    if (mode & 0x08) {
+                        if (candidateOff + 12 > blen) {
+                            rtw88_diag_log(
+                                "rtw88: 802.11v malformed BSS termination field\n");
+                            candidateOff = blen;
+                        } else {
+                            candidateOff += 12;
+                        }
+                    }
+                    if ((mode & 0x10) && candidateOff < blen) {
+                        uint8_t urlLen = b[candidateOff++];
+                        if (candidateOff + urlLen > blen) {
+                            rtw88_diag_log(
+                                "rtw88: 802.11v malformed ESS disassoc URL\n");
+                            candidateOff = blen;
+                        } else {
+                            candidateOff += urlLen;
+                        }
+                    }
+
+                    for (uint32_t off = candidateOff; off + 2 <= blen; ) {
                         uint8_t eid = b[off];
                         uint8_t elen = b[off + 1];
                         if (off + 2u + elen > blen)
