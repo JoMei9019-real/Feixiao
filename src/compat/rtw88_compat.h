@@ -71,6 +71,12 @@ struct rtw_dev;
 void rtw88_dev_printk(int level, struct device *dev, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
+/* Diagnostic logger for the macOS MLME wrapper. Unlike IOLog alone, this
+ * mirrors messages into the rtw88ctl log ring so short-lived deauth/roaming
+ * events can be recovered after a drop. */
+void rtw88_diag_log(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
+
 #define dev_err(dev, fmt, ...)  rtw88_dev_printk(KERN_ERR,   dev, fmt, ##__VA_ARGS__)
 #define dev_warn(dev, fmt, ...) rtw88_dev_printk(KERN_WARN,  dev, fmt, ##__VA_ARGS__)
 #define dev_info(dev, fmt, ...) rtw88_dev_printk(KERN_INFO,  dev, fmt, ##__VA_ARGS__)
@@ -133,11 +139,25 @@ typedef atomic_t refcount_t;
 #define WLAN_EID_VHT_OPERATION      192
 #define WLAN_EID_EXT_CAPABILITY      127
 #define WLAN_EID_EXT_SUPP_RATES      50
+#define WLAN_EID_NEIGHBOR_REPORT      52
 #define WLAN_EID_VENDOR_SPECIFIC     221
 
-/* Action-frame categories / BlockAck actions (802.11 BlockAck, category 3).
+/* Action-frame categories used by the diagnostic MLME path. */
+#define WLAN_CATEGORY_BACK            3
+#define WLAN_CATEGORY_RADIO_MEASUREMENT 5
+#define WLAN_CATEGORY_WNM            10
+
+/* 802.11k Neighbor Report actions (Radio Measurement category). */
+#define WLAN_ACTION_NEIGHBOR_REPORT_REQ   4
+#define WLAN_ACTION_NEIGHBOR_REPORT_RESP  5
+
+/* 802.11v WNM BSS Transition Management actions. */
+#define WLAN_ACTION_BSS_TRANS_QUERY       6
+#define WLAN_ACTION_BSS_TRANS_REQ         7
+#define WLAN_ACTION_BSS_TRANS_RESP        8
+
+/* BlockAck actions (802.11 BlockAck, category 3).
  * Used by the MLME to negotiate A-MPDU aggregation over the air. */
-#define WLAN_CATEGORY_BACK           3
 #define WLAN_ACTION_ADDBA_REQ        0
 #define WLAN_ACTION_ADDBA_RESP       1
 #define WLAN_ACTION_DELBA            2
