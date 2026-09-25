@@ -2336,15 +2336,20 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
 
     const uint8_t *body    = skb->data + sizeof(struct ieee80211_hdr_3addr);
     uint32_t       bodylen = skb->len  - sizeof(struct ieee80211_hdr_3addr);
-    kfree_skb(skb);
 
+    /* Read every field we need before freeing skb. The previous code freed
+     * the packet first and then dereferenced body, which is a use-after-free
+     * in kernel context and can manifest as random association failures or a
+     * kernel panic under allocator pressure. */
     if (bodylen < 6) {
         IOLog("rtw88: assoc-resp too short\n");
+        kfree_skb(skb);
         _state = RTW88_STATE_IDLE;
         return;
     }
-    uint16_t status = (uint16_t)(body[2] | (body[3] << 8));
-    uint16_t aid    = (uint16_t)((body[4] | (body[5] << 8)) & 0x3FFF);
+    uint16_t status = (uint16_t)(body[2] | ((uint16_t)body[3] << 8));
+    uint16_t aid    = (uint16_t)((body[4] | ((uint16_t)body[5] << 8)) & 0x3FFF);
+    kfree_skb(skb);
 
     if (status != 0) {
         IOLog("rtw88: assoc failed status=%u\n", status);
