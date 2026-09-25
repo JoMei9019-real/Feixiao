@@ -43,6 +43,14 @@ struct RTW88BSS {
     uint32_t cipher;       /* selected pairwise WLAN_CIPHER_SUITE_* */
     uint32_t group_cipher; /* selected group WLAN_CIPHER_SUITE_* */
     uint32_t akm;
+    uint16_t rsn_capabilities; /* raw AP RSN capabilities */
+    bool     rsn_has_psk;
+    bool     rsn_has_sae;
+    bool     pmf_capable;      /* AP MFPC bit */
+    bool     pmf_required;     /* AP MFPR bit */
+    bool     wpa3_transition;  /* PSK + SAE advertised together */
+    uint8_t  selected_rsn_ie[32]; /* exact WPA2-PSK RSN IE used by assoc + M2 */
+    uint8_t  selected_rsn_ie_len;
     uint32_t last_seen_scan;
     /* Raw IE data for association */
     uint8_t  ies[512];
