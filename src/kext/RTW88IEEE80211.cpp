@@ -1527,8 +1527,13 @@ void RTW88IEEE80211::deliverDataFrame(struct sk_buff *skb)
     uint16_t ethertype = 0;
     if (llc[0] == 0xAA && llc[1] == 0xAA && llc[2] == 0x03) {
         ethertype = (uint16_t)((llc[6] << 8) | llc[7]);
-        /* Check for EAPOL during handshake (never aggregated). */
-        if (ethertype == ETH_P_PAE && _state == RTW88_STATE_HANDSHAKING) {
+        /* EAPOL is needed both for the initial 4-way handshake and for
+         * later GTK rekeys while already connected. EAPOL frames are never
+         * handed to the normal Ethernet path here because this MLME owns the
+         * WPA2 key state. */
+        if (ethertype == ETH_P_PAE &&
+            (_state == RTW88_STATE_HANDSHAKING ||
+             _state == RTW88_STATE_CONNECTED)) {
             handleEAPOL(llc + 8, skb->len - payload_off - 8);
             kfree_skb(skb);
             return;
@@ -2696,21 +2701,101 @@ void RTW88IEEE80211::doDisconnect()
 
 void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
 {
-    if (len < 99 || data[1] != 3)
+    if (!data || len < 99 || data[1] != 3)
         return;
 
-    uint16_t eapol_body_len = (uint16_t)((data[2] << 8) | data[3]);
-    uint32_t eapol_len = 4 + eapol_body_len;
+    uint16_t eapol_body_len = (uint16_t)(((uint16_t)data[2] << 8) | data[3]);
+    uint32_t eapol_len = 4u + eapol_body_len;
     if (eapol_len > len || eapol_len < 99)
         return;
 
-    uint16_t key_info = (uint16_t)((data[5] << 8) | data[6]);
-    bool is_m1 = (key_info & 0x0088) == 0x0088 && !(key_info & 0x0100);
-    bool is_m3 = (key_info & 0x01c8) == 0x01c8;
-    uint16_t key_data_len = (uint16_t)((data[97] << 8) | data[98]);
+    uint16_t key_info = (uint16_t)(((uint16_t)data[5] << 8) | data[6]);
+    uint16_t key_data_len = (uint16_t)(((uint16_t)data[97] << 8) | data[98]);
+    bool pairwise = (key_info & 0x0008) != 0;
+    bool ack = (key_info & 0x0080) != 0;
+    bool mic = (key_info & 0x0100) != 0;
+    bool secure = (key_info & 0x0200) != 0;
+    bool encrypted = (key_info & 0x1000) != 0;
 
-    IOLog("rtw88: EAPOL key_info=0x%04x key_data_len=%u M1=%d M3=%d\n",
-          key_info, key_data_len, is_m1, is_m3);
+    bool is_m1 = pairwise && ack && !mic;
+    bool is_m3 = pairwise && ack && mic;
+    bool is_group_m1 = !pairwise && ack && mic && key_data_len > 0;
+
+    rtw88_diag_log(
+        "rtw88: EAPOL key_info=0x%04x key_data_len=%u pairwise=%d "
+        "M1=%d M3=%d groupM1=%d secure=%d enc=%d state=%d\n",
+        key_info, key_data_len, pairwise ? 1 : 0,
+        is_m1 ? 1 : 0, is_m3 ? 1 : 0, is_group_m1 ? 1 : 0,
+        secure ? 1 : 0, encrypted ? 1 : 0, (int)_state);
+
+    /* WPA2/RSN Group Key Handshake message 1/2 can arrive long after the
+     * initial 4-way handshake. The old code only consumed EAPOL while in
+     * HANDSHAKING, so the GTK rekey was ignored and the AP eventually
+     * disconnected us with reason 16 (group key update timeout). */
+    if (_state == RTW88_STATE_CONNECTED && is_group_m1) {
+        if (!_ptkConf) {
+            rtw88_diag_log("rtw88: group rekey rejected: no PTK installed\n");
+            return;
+        }
+        if (!eapol_mic_ok(_ptk, data, eapol_len)) {
+            rtw88_diag_log("rtw88: group rekey MIC check failed\n");
+            return;
+        }
+        if (99u + key_data_len > eapol_len) {
+            rtw88_diag_log("rtw88: group rekey key data truncated\n");
+            return;
+        }
+
+        const uint8_t *key_data = data + 99;
+        uint8_t unwrapped[256] = {};
+        uint16_t unwrapped_len = 0;
+
+        if (encrypted) {
+            if (!aes_unwrap_128(_ptk + 16, key_data, key_data_len,
+                                unwrapped, &unwrapped_len)) {
+                rtw88_diag_log("rtw88: group rekey AES unwrap failed\n");
+                return;
+            }
+            key_data = unwrapped;
+            key_data_len = unwrapped_len;
+        }
+
+        uint8_t gtk[32] = {};
+        uint8_t gtk_len = 0;
+        uint8_t gtk_idx = 0;
+        if (!extract_gtk_from_kde(key_data, key_data_len,
+                                  gtk, &gtk_len, &gtk_idx)) {
+            rtw88_diag_log("rtw88: group rekey GTK KDE not found\n");
+            return;
+        }
+
+        uint32_t groupCipher =
+            (_targetBSS.group_cipher == WLAN_CIPHER_SUITE_TKIP) ?
+            WLAN_CIPHER_SUITE_TKIP : WLAN_CIPHER_SUITE_CCMP;
+
+        /* Install first, acknowledge only after the driver accepted the key. */
+        if (!installKey(&_gtkConf, false, gtk_idx, groupCipher, gtk, gtk_len)) {
+            rtw88_diag_log(
+                "rtw88: group rekey GTK install failed idx=%u len=%u\n",
+                gtk_idx, gtk_len);
+            return;
+        }
+        memcpy(_gtk, gtk, gtk_len);
+        memcpy(_replayCtr, data + 9, sizeof(_replayCtr));
+
+        if (!sendGroupEAPOLKeyM2(_replayCtr, key_info)) {
+            rtw88_diag_log("rtw88: group rekey M2 transmit failed\n");
+            return;
+        }
+
+        rtw88_diag_log(
+            "rtw88: group rekey complete: GTK idx=%u len=%u, M2 sent\n",
+            gtk_idx, gtk_len);
+        return;
+    }
+
+    if (_state != RTW88_STATE_HANDSHAKING)
+        return;
 
     if (is_m1) {
         memcpy(_anonce, data + 17, 32);
@@ -2723,12 +2808,12 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
         _timer->wakeAtTime(d);
     } else if (is_m3) {
         if (!eapol_mic_ok(_ptk, data, eapol_len)) {
-            IOLog("rtw88: EAPOL M3 MIC check failed\n");
+            rtw88_diag_log("rtw88: EAPOL M3 MIC check failed\n");
             return;
         }
 
-        if (99 + key_data_len > eapol_len) {
-            IOLog("rtw88: EAPOL M3 key data truncated\n");
+        if (99u + key_data_len > eapol_len) {
+            rtw88_diag_log("rtw88: EAPOL M3 key data truncated\n");
             return;
         }
 
@@ -2740,10 +2825,10 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
         uint16_t unwrapped_len = 0;
 
         if (key_data_len) {
-            if (key_info & 0x1000) {
+            if (encrypted) {
                 if (!aes_unwrap_128(_ptk + 16, key_data, key_data_len,
                                     unwrapped, &unwrapped_len)) {
-                    IOLog("rtw88: failed to unwrap GTK key data\n");
+                    rtw88_diag_log("rtw88: failed to unwrap GTK key data\n");
                     return;
                 }
                 key_data = unwrapped;
@@ -2752,7 +2837,7 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
 
             if (!extract_gtk_from_kde(key_data, key_data_len,
                                       gtk, &gtk_len, &gtk_idx)) {
-                IOLog("rtw88: no GTK KDE found in M3 key data\n");
+                rtw88_diag_log("rtw88: no GTK KDE found in M3 key data\n");
             }
         }
 
@@ -2761,20 +2846,73 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
         if (!installKey(&_ptkConf, true, 0, WLAN_CIPHER_SUITE_CCMP,
                         _ptk + 32, 16))
             return;
-        uint32_t groupCipher = (_targetBSS.group_cipher == WLAN_CIPHER_SUITE_TKIP) ?
+        uint32_t groupCipher =
+            (_targetBSS.group_cipher == WLAN_CIPHER_SUITE_TKIP) ?
             WLAN_CIPHER_SUITE_TKIP : WLAN_CIPHER_SUITE_CCMP;
         if (gtk_len && !installKey(&_gtkConf, false, gtk_idx, groupCipher,
                                    gtk, gtk_len))
             return;
+        if (gtk_len)
+            memcpy(_gtk, gtk, gtk_len);
 
         sendEAPOLKey(4, _replayCtr, false, false, true);
         _state = RTW88_STATE_CONNECTED;
         _timer->cancelTimeout();
         if (_parent)
             _parent->setLinkStatus(kIONetworkLinkActive | kIONetworkLinkValid);
-        startTxAggregation();   /* keys are installed — negotiate uplink A-MPDU */
-        IOLog("rtw88: WPA2 connected! gtk_len=%u gtk_idx=%u\n", gtk_len, gtk_idx);
+        startTxAggregation();
+        rtw88_diag_log(
+            "rtw88: WPA2 connected! gtk_len=%u gtk_idx=%u\n",
+            gtk_len, gtk_idx);
     }
+}
+
+bool RTW88IEEE80211::sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
+                                          uint16_t rx_key_info)
+{
+    if (!replay_counter || !_ptkConf)
+        return false;
+
+    /* RSN Group Key Handshake 2/2. Keep only the descriptor-version bits
+     * negotiated by the AP, then set MIC + Secure. Key Type remains Group
+     * (zero); ACK/Install/Encrypted-Key-Data must not be reflected back. */
+    uint8_t frame[14 + 99] = {};
+    uint8_t *eth = frame;
+    memcpy(eth, _targetBSS.bssid, 6);
+    memcpy(eth + 6, _macAddr, 6);
+    eth[12] = 0x88;
+    eth[13] = 0x8e;
+
+    uint8_t *eapol = eth + 14;
+    eapol[0] = 2;
+    eapol[1] = 3;
+    eapol[2] = 0;
+    eapol[3] = 95; /* fixed RSN EAPOL-Key body, no key data */
+
+    uint8_t *key = eapol + 4;
+    key[0] = 2; /* RSN key descriptor */
+    uint16_t ki = (uint16_t)(rx_key_info & 0x0007);
+    ki |= 0x0100; /* MIC */
+    ki |= 0x0200; /* Secure */
+    key[1] = (uint8_t)(ki >> 8);
+    key[2] = (uint8_t)(ki & 0xff);
+
+    /* RSN uses zero Key Length in the supplicant's Group 2/2 response. */
+    key[3] = 0;
+    key[4] = 0;
+    memcpy(key + 5, replay_counter, 8);
+    /* Nonce/IV/RSC/Key ID stay zero. MIC occupies key[77..92]. */
+    key[93] = 0;
+    key[94] = 0;
+
+    uint8_t mic_buf[20];
+    kern_hmac_sha1(_ptk, 16, eapol, 99, mic_buf);
+    memcpy(key + 77, mic_buf, 16);
+
+    mbuf_t m = rtw88_make_packet_mbuf(frame, sizeof(frame));
+    if (!m)
+        return false;
+    return txDataFrame(m);
 }
 
 void RTW88IEEE80211::sendEAPOLKey(int step, const uint8_t *replay_counter,
