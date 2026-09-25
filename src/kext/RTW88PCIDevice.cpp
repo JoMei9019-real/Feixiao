@@ -409,6 +409,41 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
         resumeTxIfStalled();
     if (_txStalled || avail < kRTW88TxStallAvail)
         rtw88_debug_dump_tx_state();
+
+    /* Inspired by the low-bandwidth investigation in upstream issue #2 and
+     * the chvsolucoes performance experiments: sample software delivery and
+     * queue-pressure counters without changing the actual data path. */
+    if (++_perfDebugTicks >= 5) {
+        _perfDebugTicks = 0;
+
+        UInt32 txNow  = _perfTxSubmitted;
+        UInt32 rxNow  = _perfRxPackets;
+        UInt32 rxbNow = _perfRxBytes;
+        UInt32 irqNow = _perfInterrupts;
+
+        UInt32 dTx  = txNow  - _perfLastTxSubmitted;
+        UInt32 dRx  = rxNow  - _perfLastRxPackets;
+        UInt32 dRxb = rxbNow - _perfLastRxBytes;
+        UInt32 dIrq = irqNow - _perfLastInterrupts;
+
+        _perfLastTxSubmitted = txNow;
+        _perfLastRxPackets   = rxNow;
+        _perfLastRxBytes     = rxbNow;
+        _perfLastInterrupts  = irqNow;
+
+        rtw88_diag_log(
+            "rtw88: PERF 5s tx_submit=%u rx_pkts=%u rx_bytes=%u irq=%u "
+            "stalls=%u resumes=%u be_avail=%u stalled=%d\n",
+            dTx, dRx, dRxb, dIrq,
+            _perfTxStallEvents, _perfTxResumeEvents,
+            avail, _txStalled ? 1 : 0);
+
+        /* Existing helper also reports HW/SW BE pointers and RX RP/HWWP,
+         * which is exactly the state upstream issue #2 used to diagnose
+         * queue/backpressure versus RX-DMA progress. */
+        rtw88_debug_dump_tx_state();
+    }
+
     src->setTimeoutMS(1000);   /* re-arm */
 }
 
@@ -486,6 +521,7 @@ bool RTW88PCIDevice::setupInterrupt()
 
 void RTW88PCIDevice::handleInterrupt(IOInterruptEventSource *src, int count)
 {
+    _perfInterrupts++;
     if (_ieee80211)
         rtw88_trigger_interrupt();
 }
@@ -612,10 +648,15 @@ UInt32 RTW88PCIDevice::outputPacket(mbuf_t m, void *param)
      * headroom so rtw_tx never actually hits -ENOSPC.
      */
     if (rtw88_be_tx_avail() < kRTW88TxStallAvail) {
+        if (!_txStalled)
+            _perfTxStallEvents++;
         _txStalled = true;
         return kIOReturnOutputStall;
     }
-    return _ieee80211->outputPacket(m);
+    UInt32 ret = _ieee80211->outputPacket(m);
+    if (ret == kIOReturnOutputSuccess)
+        _perfTxSubmitted++;
+    return ret;
 }
 
 void RTW88PCIDevice::resumeTxIfStalled()
@@ -624,6 +665,7 @@ void RTW88PCIDevice::resumeTxIfStalled()
      * service so we never block on the output-queue gate from here. */
     if (_txStalled && rtw88_be_tx_avail() >= kRTW88TxResumeAvail) {
         _txStalled = false;
+        _perfTxResumeEvents++;
         if (_txQueue)
             _txQueue->service(IOBasicOutputQueue::kServiceAsync);
     }
@@ -740,6 +782,9 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
      * via the input queue keeps frame delivery off whatever thread called us. */
     _iface->inputPacket(m, 0, IONetworkInterface::kInputOptionQueuePacket);
     _iface->flushInputQueue();
+
+    _perfRxPackets++;
+    _perfRxBytes += (UInt32)plen;
 
     IONetworkData *nd = _iface->getNetworkData(kIONetworkStatsKey);
     if (nd) {
