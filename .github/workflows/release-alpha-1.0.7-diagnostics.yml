@@ -1,0 +1,76 @@
+name: Release Feixiao Alpha 1.0.7 Diagnostics
+
+on:
+  push:
+    branches:
+      - alpha-1.0.7-diagnostics
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: macos-latest
+    env:
+      TAG: v1.0.7-alpha.1-diagnostics
+      RELEASE_NAME: Feixiao Alpha 1.0.7 Diagnostics
+
+    steps:
+      - name: Checkout Feixiao
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: Feixiao
+
+      - name: Clone rtw88-stable
+        run: git clone --depth 1 https://github.com/thegwchr/rtw88-stable.git
+
+      - name: Download firmware blobs
+        run: |
+          cd Feixiao/firmware
+          for fw in rtw8822b_fw.bin rtw8822c_fw.bin rtw8821c_fw.bin \
+                    rtw8821a_fw.bin rtw8812a_fw.bin rtw8814a_fw.bin; do
+            if [ ! -s "$fw" ]; then
+              curl -fL --retry 3 -o "$fw" \
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw"
+            fi
+          done
+
+      - name: Build kext and rtw88ctl
+        run: make all
+        working-directory: Feixiao
+
+      - name: Validate output
+        run: |
+          test -f Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
+          test -x Feixiao/build/out/rtw88ctl
+          plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Feixiao/build/out/rtw88.kext/Contents/Info.plist)" = "1.0.7"
+
+      - name: Package diagnostics build
+        run: |
+          mkdir -p release
+          cp -R Feixiao/build/out/rtw88.kext release/
+          cp Feixiao/build/out/rtw88ctl release/
+          cp Feixiao/ALPHA-1.0.7-DIAGNOSTICS.md release/README-ALPHA.md
+          ditto -c -k --sequesterRsrc --keepParent release Feixiao-Alpha-1.0.7-Diagnostics.zip
+          shasum -a 256 Feixiao-Alpha-1.0.7-Diagnostics.zip > Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" Feixiao-Alpha-1.0.7-Diagnostics.zip \
+              Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              Feixiao-Alpha-1.0.7-Diagnostics.zip \
+              Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256 \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_NAME" \
+              --notes-file Feixiao/ALPHA-1.0.7-DIAGNOSTICS.md
+          fi
