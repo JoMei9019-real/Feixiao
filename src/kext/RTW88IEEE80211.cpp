@@ -1038,8 +1038,16 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
                 const uint8_t *rb = skb->data + sizeof(*h3);
                 uint16_t reason = (skb->len >= sizeof(*h3) + 2) ?
                                   (uint16_t)(rb[0] | (rb[1] << 8)) : 0;
-                IOLog("rtw88: %s from AP, reason=%u — disconnecting\n",
-                      (stype == 0x00C0) ? "deauth" : "disassoc", reason);
+                rtw88_diag_log(
+                    "rtw88: %s from AP, reason=%u state=%u "
+                    "src=%02x:%02x:%02x:%02x:%02x:%02x "
+                    "dst=%02x:%02x:%02x:%02x:%02x:%02x — disconnecting\n",
+                    (stype == 0x00C0) ? "deauth" : "disassoc", reason,
+                    (unsigned)_state,
+                    h3->addr2[0], h3->addr2[1], h3->addr2[2],
+                    h3->addr2[3], h3->addr2[4], h3->addr2[5],
+                    h3->addr1[0], h3->addr1[1], h3->addr1[2],
+                    h3->addr1[3], h3->addr1[4], h3->addr1[5]);
             }
             clearKeys();
             _txBaActive = false;
@@ -1059,10 +1067,121 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
             const uint8_t *b = skb->data + sizeof(*h3);
             uint32_t blen = (skb->len > sizeof(*h3)) ?
                             skb->len - (uint32_t)sizeof(*h3) : 0;
-            /* BlockAck (ADDBA/DELBA) action frames from our AP only. */
-            if (blen >= 2 && b[0] == WLAN_CATEGORY_BACK &&
-                memcmp(h3->addr3, _targetBSS.bssid, 6) == 0)
-                handleBackAction(b, blen);
+
+            if (blen >= 2) {
+                uint8_t category = b[0];
+                uint8_t action   = b[1];
+                bool fromTarget =
+                    memcmp(h3->addr3, _targetBSS.bssid, 6) == 0 ||
+                    memcmp(h3->addr2, _targetBSS.bssid, 6) == 0;
+
+                rtw88_diag_log(
+                    "rtw88: action frame category=%u action=%u len=%u "
+                    "from=%02x:%02x:%02x:%02x:%02x:%02x target=%d\n",
+                    category, action, blen,
+                    h3->addr2[0], h3->addr2[1], h3->addr2[2],
+                    h3->addr2[3], h3->addr2[4], h3->addr2[5],
+                    fromTarget ? 1 : 0);
+
+                /* 802.11v: WNM BSS Transition Management Request.
+                 *
+                 * Fixed fields after category/action:
+                 *   dialog token (1), request mode (1), disassoc timer (2),
+                 *   validity interval (1), followed by optional fields/IEs.
+                 * Alpha 1.0.4 is diagnostics-only: do not roam yet.
+                 */
+                if (fromTarget && category == WLAN_CATEGORY_WNM &&
+                    action == WLAN_ACTION_BSS_TRANS_REQ && blen >= 7) {
+                    uint8_t dialog = b[2];
+                    uint8_t mode = b[3];
+                    uint16_t disassocTimer =
+                        (uint16_t)(b[4] | ((uint16_t)b[5] << 8));
+                    uint8_t validity = b[6];
+
+                    rtw88_diag_log(
+                        "rtw88: 802.11v BSS Transition Request "
+                        "dialog=%u mode=0x%02x disassoc_timer=%u "
+                        "validity=%u candidate_list=%d abridged=%d "
+                        "disassoc_imminent=%d\n",
+                        dialog, mode, disassocTimer, validity,
+                        (mode & 0x01) ? 1 : 0,
+                        (mode & 0x02) ? 1 : 0,
+                        (mode & 0x04) ? 1 : 0);
+
+                    /* Walk any Neighbor Report IEs we can identify. Optional
+                     * BSS termination / ESS-disassociation fields can precede
+                     * the candidate list, so this scan is intentionally
+                     * defensive and only accepts complete EID 52 elements. */
+                    for (uint32_t off = 7; off + 2 <= blen; ) {
+                        uint8_t eid = b[off];
+                        uint8_t elen = b[off + 1];
+                        if (off + 2u + elen > blen)
+                            break;
+                        if (eid == WLAN_EID_NEIGHBOR_REPORT && elen >= 13) {
+                            const uint8_t *nr = &b[off + 2];
+                            uint8_t opClass = nr[10];
+                            uint8_t channel = nr[11];
+                            uint8_t phyType = nr[12];
+                            int preference = -1;
+
+                            /* Neighbor Report subelements follow the fixed
+                             * 13-byte body. Candidate Preference is subelement
+                             * ID 3 with a one-byte value. */
+                            uint32_t nroff = 13;
+                            while (nroff + 2 <= elen) {
+                                uint8_t sid = nr[nroff];
+                                uint8_t slen = nr[nroff + 1];
+                                if (nroff + 2u + slen > elen)
+                                    break;
+                                if (sid == 3 && slen >= 1)
+                                    preference = nr[nroff + 2];
+                                nroff += 2u + slen;
+                            }
+
+                            rtw88_diag_log(
+                                "rtw88: 802.11v candidate "
+                                "%02x:%02x:%02x:%02x:%02x:%02x "
+                                "opclass=%u channel=%u phy=%u preference=%d\n",
+                                nr[0], nr[1], nr[2], nr[3], nr[4], nr[5],
+                                opClass, channel, phyType, preference);
+                        }
+                        off += 2u + elen;
+                    }
+                }
+
+                /* 802.11k: Neighbor Report Response. This is also
+                 * diagnostics-only for Alpha 1.0.4. */
+                if (fromTarget &&
+                    category == WLAN_CATEGORY_RADIO_MEASUREMENT &&
+                    action == WLAN_ACTION_NEIGHBOR_REPORT_RESP &&
+                    blen >= 3) {
+                    uint8_t dialog = b[2];
+                    rtw88_diag_log(
+                        "rtw88: 802.11k Neighbor Report Response dialog=%u\n",
+                        dialog);
+
+                    for (uint32_t off = 3; off + 2 <= blen; ) {
+                        uint8_t eid = b[off];
+                        uint8_t elen = b[off + 1];
+                        if (off + 2u + elen > blen)
+                            break;
+                        if (eid == WLAN_EID_NEIGHBOR_REPORT && elen >= 13) {
+                            const uint8_t *nr = &b[off + 2];
+                            rtw88_diag_log(
+                                "rtw88: 802.11k neighbor "
+                                "%02x:%02x:%02x:%02x:%02x:%02x "
+                                "opclass=%u channel=%u phy=%u\n",
+                                nr[0], nr[1], nr[2], nr[3], nr[4], nr[5],
+                                nr[10], nr[11], nr[12]);
+                        }
+                        off += 2u + elen;
+                    }
+                }
+
+                /* Preserve existing BlockAck handling. */
+                if (category == WLAN_CATEGORY_BACK && fromTarget)
+                    handleBackAction(b, blen);
+            }
         }
         kfree_skb(skb);
         break;
