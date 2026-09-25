@@ -10,6 +10,7 @@ Experimental WPA2/WPA3 transition-mode compatibility build.
 - Reuses the exact same selected RSN IE in both the Association Request and EAPOL M2.
 - Refuses PMF-required networks cleanly instead of entering an unsupported half-associated state.
 - Keeps Alpha 1.0.4 802.11k/v and deauth/disassoc diagnostics.
+- Fixes an existing association-response use-after-free (the skb was freed before status/AID were read), reducing kernel-panic/random-association risk.
 
 ## Safety scope
 
