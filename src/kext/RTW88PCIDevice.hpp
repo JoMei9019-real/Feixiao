@@ -151,6 +151,21 @@ private:
      * slots and resumes the queue.  See createOutputQueue()/outputPacket(). */
     volatile bool           _txStalled    = false;
 
+    /* Performance diagnostics only. These counters do not influence queue,
+     * DMA, interrupt, or rate-control behaviour; they are sampled by the
+     * existing 1 s debug timer and emitted every 5 s. */
+    volatile UInt32         _perfTxSubmitted   = 0;
+    volatile UInt32         _perfTxStallEvents = 0;
+    volatile UInt32         _perfTxResumeEvents= 0;
+    volatile UInt32         _perfRxPackets     = 0;
+    volatile UInt32         _perfRxBytes       = 0;
+    volatile UInt32         _perfInterrupts    = 0;
+    UInt32                  _perfLastTxSubmitted = 0;
+    UInt32                  _perfLastRxPackets   = 0;
+    UInt32                  _perfLastRxBytes     = 0;
+    UInt32                  _perfLastInterrupts  = 0;
+    UInt32                  _perfDebugTicks       = 0;
+
     /* Linked-list of allocated DMA buffers for cleanup */
     struct DMAEntry {
         IOBufferMemoryDescriptor *desc;
