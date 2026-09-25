@@ -68,15 +68,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" Feixiao-Alpha-1.0.4.zip \
-              Feixiao-Alpha-1.0.4.zip.sha256 --clobber
+              Feixiao-Alpha-1.0.4.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$TAG" \
               Feixiao-Alpha-1.0.4.zip \
               Feixiao-Alpha-1.0.4.zip.sha256 \
               --target "$GITHUB_SHA" \
               --prerelease \
+              --repo "$GITHUB_REPOSITORY" \
               --title "$RELEASE_NAME" \
               --notes "Experimental Alpha 1.0.4 for macOS testing. Adds persistent deauth/disassoc diagnostics and 802.11k Neighbor Report / 802.11v BSS Transition Request logging. This alpha does not yet perform automatic 802.11k/v roaming."
           fi
