@@ -52,6 +52,18 @@ void rtw88_printk(int level, const char *fmt, ...)
     rtw88_log_append(ring_msg);
 }
 
+void rtw88_diag_log(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    IOLog("%s", buf);
+    rtw88_log_append(buf);
+}
+
 void rtw88_dev_printk(int level, struct device *dev, const char *fmt, ...)
 {
     if (level > rtw88_log_level) return;
