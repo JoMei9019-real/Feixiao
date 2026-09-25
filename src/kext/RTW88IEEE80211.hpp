@@ -135,6 +135,8 @@ private:
     bool      deriveKeys(const uint8_t *anonce, const uint8_t *snonce);
     void      sendEAPOLKey(int step, const uint8_t *replay_counter,
                             bool install, bool ack, bool mic);
+    bool      sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
+                                   uint16_t rx_key_info);
 
     /* A-MPDU BlockAck (aggregation) negotiation */
     bool      htAllowed() const;   /* HT/VHT/A-MPDU usable on this link? */
