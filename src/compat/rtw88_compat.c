@@ -1047,7 +1047,8 @@ void rtw88_debug_dump_tx_state(void)
     u32 rx_hw_wp = (rxbd >> 16) & RTW88_DBG_TRX_BD_IDX_MASK;
     u32 rx_rp    = rxbd & RTW88_DBG_TRX_BD_IDX_MASK;
 
-    IOLog("rtw88: TXSTATE BE hw_wp=%u hw_rp=%u sw_wp=%u sw_rp=%u qlen=%u "
+    rtw88_diag_log(
+          "rtw88: TXSTATE BE hw_wp=%u hw_rp=%u sw_wp=%u sw_rp=%u qlen=%u "
           "TXDMA_ST=0x%08x PKT_EMPTY=0x%04x BD[rp]:dma0=0x%08x dma1=0x%08x "
           "sz0=%u sz1=%u psb=0x%04x RX_rp=%u RX_hwwp=%u "
           "HISR0=0x%08x HISR3=0x%08x BEDOK_p=%d\n",
