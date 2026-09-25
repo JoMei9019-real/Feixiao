@@ -2164,6 +2164,37 @@ IOReturn RTW88IEEE80211::cmdConnect(const char *ssid, const char *password)
 
     strlcpy(_password, password ? password : "", sizeof(_password));
     _wpa2 = (_targetBSS.cipher == WLAN_CIPHER_SUITE_CCMP);
+
+    if (_targetBSS.wpa3_transition) {
+        rtw88_diag_log(
+            "rtw88: RSN transition network detected: PSK=1 SAE=1 "
+            "MFPC=%d MFPR=%d caps=0x%04x; selecting WPA2-PSK/CCMP\n",
+            _targetBSS.pmf_capable ? 1 : 0,
+            _targetBSS.pmf_required ? 1 : 0,
+            _targetBSS.rsn_capabilities);
+    } else if (_wpa2) {
+        rtw88_diag_log(
+            "rtw88: RSN WPA2 network: PSK=%d SAE=%d MFPC=%d MFPR=%d "
+            "caps=0x%04x\n",
+            _targetBSS.rsn_has_psk ? 1 : 0,
+            _targetBSS.rsn_has_sae ? 1 : 0,
+            _targetBSS.pmf_capable ? 1 : 0,
+            _targetBSS.pmf_required ? 1 : 0,
+            _targetBSS.rsn_capabilities);
+    }
+
+    /* Feixiao does not implement 802.11w PMF yet. Never claim PMF support,
+     * and fail cleanly instead of entering a half-associated state if an AP
+     * requires it. This is intentionally conservative to avoid unstable
+     * kernel/firmware state during experimental transition-mode support. */
+    if (_wpa2 && _targetBSS.pmf_required) {
+        rtw88_diag_log(
+            "rtw88: refusing connection: AP requires PMF (MFPR=1), "
+            "unsupported by this alpha\n");
+        memset(_password, 0, sizeof(_password));
+        return kIOReturnUnsupported;
+    }
+
     _state = RTW88_STATE_AUTHENTICATING;
 
     /* Run doAuthenticate on a background thread_call so the IOUserClient
