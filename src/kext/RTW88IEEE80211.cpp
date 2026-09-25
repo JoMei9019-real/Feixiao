@@ -1227,25 +1227,44 @@ static void rtw88WriteSuite(uint8_t *p, uint32_t suite)
     p[3] = (uint8_t)suite;
 }
 
-static bool rtw88RsnSelectCcmpPsk(const uint8_t *rsn, uint8_t len,
-                                  uint32_t *pairwise_cipher,
-                                  uint32_t *group_cipher)
+struct RTW88RsnSelection {
+    uint32_t pairwise_cipher;
+    uint32_t group_cipher;
+    uint16_t capabilities;
+    bool has_psk;
+    bool has_sae;
+    bool mfpc;
+    bool mfpr;
+};
+
+static bool rtw88ParseRsnForWpa2Fallback(const uint8_t *rsn, uint8_t len,
+                                         RTW88RsnSelection *sel)
 {
+    if (!rsn || !sel)
+        return false;
+
+    memset(sel, 0, sizeof(*sel));
     const uint8_t *p = rsn;
     const uint8_t *end = rsn + len;
 
-    if (p + 8 > end)
+    /* Version(2) + group cipher(4) + pairwise count(2). */
+    if ((size_t)(end - p) < 8)
         return false;
 
-    p += 2; /* version */
+    uint16_t version = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+    if (version != 1)
+        return false;
+    p += 2;
+
     uint32_t group = rtw88ReadSuite(p);
     p += 4;
 
-    if (p + 2 > end)
+    if ((size_t)(end - p) < 2)
         return false;
-    uint16_t pairwiseCount = (uint16_t)(p[0] | (p[1] << 8));
+    uint16_t pairwiseCount = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
     p += 2;
-    if (p + pairwiseCount * 4 > end)
+    if (pairwiseCount == 0 ||
+        (size_t)(end - p) < (size_t)pairwiseCount * 4)
         return false;
 
     bool hasCcmp = false;
@@ -1254,18 +1273,27 @@ static bool rtw88RsnSelectCcmpPsk(const uint8_t *rsn, uint8_t len,
             hasCcmp = true;
     }
 
-    if (p + 2 > end)
+    if ((size_t)(end - p) < 2)
         return false;
-    uint16_t akmCount = (uint16_t)(p[0] | (p[1] << 8));
+    uint16_t akmCount = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
     p += 2;
-    if (p + akmCount * 4 > end)
+    if (akmCount == 0 ||
+        (size_t)(end - p) < (size_t)akmCount * 4)
         return false;
 
     bool hasPsk = false;
+    bool hasSae = false;
     for (uint16_t i = 0; i < akmCount; i++, p += 4) {
-        if (rtw88ReadSuite(p) == 0x000FAC02) /* 00-0f-ac:2 PSK */
+        uint32_t suite = rtw88ReadSuite(p);
+        if (suite == 0x000FAC02)      /* 00-0f-ac:2 PSK */
             hasPsk = true;
+        else if (suite == 0x000FAC08) /* 00-0f-ac:8 SAE */
+            hasSae = true;
     }
+
+    uint16_t caps = 0;
+    if ((size_t)(end - p) >= 2)
+        caps = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 
     if (!hasCcmp || !hasPsk)
         return false;
@@ -1274,29 +1302,41 @@ static bool rtw88RsnSelectCcmpPsk(const uint8_t *rsn, uint8_t len,
         group != WLAN_CIPHER_SUITE_TKIP)
         group = WLAN_CIPHER_SUITE_CCMP;
 
-    if (pairwise_cipher)
-        *pairwise_cipher = WLAN_CIPHER_SUITE_CCMP;
-    if (group_cipher)
-        *group_cipher = group;
+    sel->pairwise_cipher = WLAN_CIPHER_SUITE_CCMP;
+    sel->group_cipher = group;
+    sel->capabilities = caps;
+    sel->has_psk = hasPsk;
+    sel->has_sae = hasSae;
+    sel->mfpr = (caps & (1u << 6)) != 0;
+    sel->mfpc = (caps & (1u << 7)) != 0;
     return true;
 }
 
-static uint16_t rtw88BuildSelectedRsnIe(uint8_t *out, uint32_t group_cipher)
+static uint8_t rtw88BuildWpa2PskRsnIe(uint8_t *out, uint32_t out_len,
+                                      uint32_t group_cipher)
 {
+    /* 2-byte IE header + 20-byte RSN body. Fixed-size and allocation-free:
+     * keep this path deliberately simple because it executes in kernel space. */
+    if (!out || out_len < 22)
+        return 0;
+
     if (group_cipher != WLAN_CIPHER_SUITE_TKIP)
         group_cipher = WLAN_CIPHER_SUITE_CCMP;
 
     uint8_t *p = out;
     *p++ = WLAN_EID_RSN;
-    *p++ = 20;           /* body length */
-    *p++ = 1; *p++ = 0;  /* version */
+    *p++ = 20;
+    *p++ = 1; *p++ = 0;  /* RSN version 1 */
     rtw88WriteSuite(p, group_cipher); p += 4;
-    *p++ = 1; *p++ = 0;  /* one pairwise cipher */
+    *p++ = 1; *p++ = 0;
     rtw88WriteSuite(p, WLAN_CIPHER_SUITE_CCMP); p += 4;
-    *p++ = 1; *p++ = 0;  /* one AKM */
-    rtw88WriteSuite(p, 0x000FAC02); p += 4; /* PSK */
-    *p++ = 0; *p++ = 0;  /* RSN capabilities */
-    return (uint16_t)(p - out);
+    *p++ = 1; *p++ = 0;
+    rtw88WriteSuite(p, 0x000FAC02); p += 4; /* WPA2-PSK */
+    /* Do not advertise MFPC/MFPR: Feixiao does not yet implement 802.11w
+     * protected management frames. A transition-mode AP must allow the
+     * WPA2-PSK path without requiring PMF. */
+    *p++ = 0; *p++ = 0;
+    return (uint8_t)(p - out);
 }
 
 void RTW88IEEE80211::processScanResult(struct sk_buff *skb)
@@ -1333,12 +1373,21 @@ void RTW88IEEE80211::processScanResult(struct sk_buff *skb)
         } else if (id == WLAN_EID_HT_OPERATION && len >= 1 && bss->channel == 0) {
             bss->channel = body[2];
         } else if (id == WLAN_EID_RSN) {
-            uint32_t pairwise = 0;
-            uint32_t group = 0;
-            if (rtw88RsnSelectCcmpPsk(body + 2, len, &pairwise, &group)) {
-                bss->cipher = pairwise;
-                bss->group_cipher = group;
-                bss->akm = 0x000FAC02; /* PSK */
+            RTW88RsnSelection rsn = {};
+            if (rtw88ParseRsnForWpa2Fallback(body + 2, len, &rsn)) {
+                bss->cipher = rsn.pairwise_cipher;
+                bss->group_cipher = rsn.group_cipher;
+                bss->akm = 0x000FAC02; /* selected WPA2-PSK fallback */
+                bss->rsn_capabilities = rsn.capabilities;
+                bss->rsn_has_psk = rsn.has_psk;
+                bss->rsn_has_sae = rsn.has_sae;
+                bss->pmf_capable = rsn.mfpc;
+                bss->pmf_required = rsn.mfpr;
+                bss->wpa3_transition = rsn.has_psk && rsn.has_sae;
+                bss->selected_rsn_ie_len =
+                    rtw88BuildWpa2PskRsnIe(bss->selected_rsn_ie,
+                                           sizeof(bss->selected_rsn_ie),
+                                           bss->group_cipher);
             }
         } else if (id == WLAN_EID_VENDOR_SPECIFIC &&
                    len >= 8 && body[2] == 0x00 && body[3] == 0x50 &&
@@ -2510,8 +2559,19 @@ bool RTW88IEEE80211::buildAssocReq(uint8_t *buf, uint32_t *len)
      * both pairwise ciphers; copying that raw IE can make the AP pick a path
      * we do not want. */
     if (_wpa2) {
-        uint16_t rsn_len = rtw88BuildSelectedRsnIe(body, _targetBSS.group_cipher);
-        body += rsn_len;
+        /* Use the exact cached WPA2-PSK RSN IE selected during scanning.
+         * EAPOL M2 uses these same bytes, avoiding association/handshake
+         * profile drift on WPA2/WPA3 transition networks. */
+        if (_targetBSS.selected_rsn_ie_len > 0 &&
+            _targetBSS.selected_rsn_ie_len <= sizeof(_targetBSS.selected_rsn_ie)) {
+            memcpy(body, _targetBSS.selected_rsn_ie,
+                   _targetBSS.selected_rsn_ie_len);
+            body += _targetBSS.selected_rsn_ie_len;
+        } else {
+            uint8_t rsn_len =
+                rtw88BuildWpa2PskRsnIe(body, 32, _targetBSS.group_cipher);
+            body += rsn_len;
+        }
     }
 
     *len = (uint32_t)(body - buf);
@@ -2711,8 +2771,17 @@ void RTW88IEEE80211::sendEAPOLKey(int step, const uint8_t *replay_counter,
 
     uint16_t key_data_len = 0;
     if (step == 2) {
-        key_data_len = rtw88BuildSelectedRsnIe(eapol + 99, _targetBSS.group_cipher);
-        if (99 + key_data_len > sizeof(frame) - 14)
+        if (_targetBSS.selected_rsn_ie_len > 0 &&
+            _targetBSS.selected_rsn_ie_len <= sizeof(_targetBSS.selected_rsn_ie)) {
+            key_data_len = _targetBSS.selected_rsn_ie_len;
+            memcpy(eapol + 99, _targetBSS.selected_rsn_ie, key_data_len);
+        } else {
+            key_data_len =
+                rtw88BuildWpa2PskRsnIe(eapol + 99,
+                                       (uint32_t)(sizeof(frame) - 14 - 99),
+                                       _targetBSS.group_cipher);
+        }
+        if (99u + key_data_len > sizeof(frame) - 14)
             key_data_len = 0;
     }
 
