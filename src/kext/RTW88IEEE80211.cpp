@@ -2773,24 +2773,41 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
             (_targetBSS.group_cipher == WLAN_CIPHER_SUITE_TKIP) ?
             WLAN_CIPHER_SUITE_TKIP : WLAN_CIPHER_SUITE_CCMP;
 
-        /* Install first, acknowledge only after the driver accepted the key. */
-        if (!installKey(&_gtkConf, false, gtk_idx, groupCipher, gtk, gtk_len)) {
+        /* Replay counters are big-endian byte strings, so memcmp preserves
+         * their numeric ordering. A retransmitted Group M1 must be answered
+         * again, but MUST NOT reinstall the same GTK (reinstalling a key can
+         * reset receive replay state). */
+        int replayCmp = memcmp(data + 9, _replayCtr, sizeof(_replayCtr));
+        bool duplicateGroupM1 = (replayCmp == 0);
+        if (replayCmp < 0) {
             rtw88_diag_log(
-                "rtw88: group rekey GTK install failed idx=%u len=%u\n",
-                gtk_idx, gtk_len);
+                "rtw88: group rekey stale replay counter ignored\n");
             return;
         }
-        memcpy(_gtk, gtk, gtk_len);
-        memcpy(_replayCtr, data + 9, sizeof(_replayCtr));
 
-        if (!sendGroupEAPOLKeyM2(_replayCtr, key_info)) {
+        if (!duplicateGroupM1) {
+            if (!installKey(&_gtkConf, false, gtk_idx, groupCipher,
+                            gtk, gtk_len)) {
+                rtw88_diag_log(
+                    "rtw88: group rekey GTK install failed idx=%u len=%u\n",
+                    gtk_idx, gtk_len);
+                return;
+            }
+            memcpy(_gtk, gtk, gtk_len);
+            memcpy(_replayCtr, data + 9, sizeof(_replayCtr));
+        } else {
+            rtw88_diag_log(
+                "rtw88: duplicate group M1 replay; resending M2 without GTK reinstall\n");
+        }
+
+        if (!sendGroupEAPOLKeyM2(data + 9, key_info, data[0], data[4])) {
             rtw88_diag_log("rtw88: group rekey M2 transmit failed\n");
             return;
         }
 
         rtw88_diag_log(
-            "rtw88: group rekey complete: GTK idx=%u len=%u, M2 sent\n",
-            gtk_idx, gtk_len);
+            "rtw88: group rekey complete: GTK idx=%u len=%u, M2 sent%s\n",
+            gtk_idx, gtk_len, duplicateGroupM1 ? " (retry)" : "");
         return;
     }
 
@@ -2868,7 +2885,9 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
 }
 
 bool RTW88IEEE80211::sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
-                                          uint16_t rx_key_info)
+                                          uint16_t rx_key_info,
+                                          uint8_t eapol_version,
+                                          uint8_t descriptor_type)
 {
     if (!replay_counter || !_ptkConf)
         return false;
@@ -2884,13 +2903,13 @@ bool RTW88IEEE80211::sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
     eth[13] = 0x8e;
 
     uint8_t *eapol = eth + 14;
-    eapol[0] = 2;
+    eapol[0] = eapol_version;
     eapol[1] = 3;
     eapol[2] = 0;
     eapol[3] = 95; /* fixed RSN EAPOL-Key body, no key data */
 
     uint8_t *key = eapol + 4;
-    key[0] = 2; /* RSN key descriptor */
+    key[0] = descriptor_type; /* mirror the AP's EAPOL-Key descriptor */
     uint16_t ki = (uint16_t)(rx_key_info & 0x0007);
     ki |= 0x0100; /* MIC */
     ki |= 0x0200; /* Secure */
@@ -2909,10 +2928,21 @@ bool RTW88IEEE80211::sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
     kern_hmac_sha1(_ptk, 16, eapol, 99, mic_buf);
     memcpy(key + 77, mic_buf, 16);
 
+    rtw88_diag_log(
+        "rtw88: group M2 tx key_info=0x%04x replay=%02x%02x%02x%02x%02x%02x%02x%02x "
+        "protected=1 ampdu=0\n",
+        ki,
+        replay_counter[0], replay_counter[1], replay_counter[2], replay_counter[3],
+        replay_counter[4], replay_counter[5], replay_counter[6], replay_counter[7]);
+
     mbuf_t m = rtw88_make_packet_mbuf(frame, sizeof(frame));
     if (!m)
         return false;
-    return txDataFrame(m);
+
+    /* Unlike the initial 4-way handshake, a group rekey happens after the PTK
+     * is installed. Send Group M2 through the pairwise-protected data path.
+     * txDataFrame also explicitly excludes all EAPOL frames from A-MPDU. */
+    return txDataFrame(m, true);
 }
 
 void RTW88IEEE80211::sendEAPOLKey(int step, const uint8_t *replay_counter,
@@ -3236,7 +3266,7 @@ bool RTW88IEEE80211::txProbeRequest()
     return txMgmtFrame(frame, (uint32_t)(body - frame));
 }
 
-bool RTW88IEEE80211::txDataFrame(mbuf_t m)
+bool RTW88IEEE80211::txDataFrame(mbuf_t m, bool protectEapol)
 {
     if (!_hw || !_hw->ops || !_hw->ops->tx || !_vif || !_sta) {
         mbuf_freem(m);
@@ -3254,7 +3284,8 @@ bool RTW88IEEE80211::txDataFrame(mbuf_t m)
     uint8_t eh[14];
     if (mbuf_copydata(m, 0, 14, eh) != 0) { mbuf_freem(m); return false; }
     uint16_t ethertype = (uint16_t)((eh[12] << 8) | eh[13]);
-    bool protected_frame = _wpa2 && _ptkConf && ethertype != ETH_P_PAE;
+    bool isEapol = (ethertype == ETH_P_PAE);
+    bool protected_frame = _wpa2 && _ptkConf && (!isEapol || protectEapol);
 
     /* Use a QoS Data frame (24-byte header + 2-byte QoS Control) when HT is in
      * use — A-MPDU/BlockAck is strictly per-TID and a plain Data frame carries
@@ -3343,7 +3374,11 @@ bool RTW88IEEE80211::txDataFrame(mbuf_t m)
      * aggregation: rtw88 then sets the descriptor's AGG_EN bit and the hardware
      * builds A-MPDUs. (rtw_tx reads this flag directly; the txq/RTW_TXQ_AMPDU
      * path is unused by this port.) */
-    if (qos && _txBaActive)
+    /* Keep 802.1X/EAPOL control traffic out of A-MPDU. The initial handshake
+     * already happened before BA was active, but Group M2 is sent later while
+     * _txBaActive is true; aggregating that control frame can make an AP miss
+     * the rekey acknowledgement and eventually deauthenticate with reason 16. */
+    if (qos && _txBaActive && !isEapol)
         info->flags |= IEEE80211_TX_CTL_AMPDU;
     info->band  = (_targetBSS.channel > 14) ? NL80211_BAND_5GHZ
                                             : NL80211_BAND_2GHZ;
