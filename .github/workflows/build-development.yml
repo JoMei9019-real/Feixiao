@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -60,3 +60,17 @@ jobs:
           path: |
             Feixiao-1.0.8-Developer-Beta-1.zip
             Feixiao-1.0.8-Developer-Beta-1.zip.sha256
+
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v1.0.8-developer-beta.1" \
+            "Feixiao-1.0.8-Developer-Beta-1.zip" \
+            "Feixiao-1.0.8-Developer-Beta-1.zip.sha256" \
+            --title "Feixiao 1.0.8 Developer Beta 1" \
+            --notes "Development prerelease. Includes the RX input-queue batching experiment on top of the current 1.0.7 stable baseline. Intended for testing; main remains the stable branch." \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --repo "${{ github.repository }}"
