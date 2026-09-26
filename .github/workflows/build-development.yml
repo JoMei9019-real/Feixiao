@@ -43,19 +43,20 @@ jobs:
           test -f Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
           test -x Feixiao/build/out/rtw88ctl
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.0.8.1"
 
       - name: Package
         run: |
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-Development.zip
-          shasum -a 256 Feixiao-Development.zip > Feixiao-Development.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Developer-Beta-1.zip
+          shasum -a 256 Feixiao-1.0.8-Developer-Beta-1.zip > Feixiao-1.0.8-Developer-Beta-1.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-Development
+          name: Feixiao-1.0.8-Developer-Beta-1
           path: |
-            Feixiao-Development.zip
-            Feixiao-Development.zip.sha256
+            Feixiao-1.0.8-Developer-Beta-1.zip
+            Feixiao-1.0.8-Developer-Beta-1.zip.sha256
