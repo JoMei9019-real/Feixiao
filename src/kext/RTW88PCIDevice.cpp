@@ -21,8 +21,8 @@ extern "C" boolean_t preemption_enabled(void);
 #define super IOEthernetController
 OSDefineMetaClassAndStructors(RTW88PCIDevice, IOEthernetController)
 
-static constexpr unsigned int kRTW88TxStallAvail = 96;
-static constexpr unsigned int kRTW88TxResumeAvail = 160;
+static constexpr unsigned int kRTW88TxStallAvail = 160;
+static constexpr unsigned int kRTW88TxResumeAvail = 208;
 
 /* ------------------------------------------------------------------ */
 /*  PCI ops shim (C linkage, called from driver C code)                */
