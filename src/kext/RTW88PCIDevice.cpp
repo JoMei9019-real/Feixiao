@@ -524,6 +524,11 @@ void RTW88PCIDevice::handleInterrupt(IOInterruptEventSource *src, int count)
     _perfInterrupts++;
     if (_ieee80211)
         rtw88_trigger_interrupt();
+
+    /* RX batching A/B experiment from upstream b72076a and the
+     * chvsolucoes performance work: submit queued macOS input packets once
+     * per interrupt/poll instead of flushing for every individual MSDU. */
+    flushRxQueue();
 }
 
 /* ------------------------------------------------------------------ */
@@ -778,10 +783,11 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
         return;
     }
 
-    /* Queue + flush, matching the proven itlwm submission path.  Submitting
-     * via the input queue keeps frame delivery off whatever thread called us. */
+    /* Queue only. handleInterrupt() flushes the whole RX batch after the
+     * poll. This removes one macOS input-queue flush from every received MSDU.
+     * The stable main branch intentionally retains per-packet flushing. */
     _iface->inputPacket(m, 0, IONetworkInterface::kInputOptionQueuePacket);
-    _iface->flushInputQueue();
+    _rxQueued = true;
 
     _perfRxPackets++;
     _perfRxBytes += (UInt32)plen;
@@ -790,6 +796,14 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
     if (nd) {
         IONetworkStats *stats = (IONetworkStats *)nd->getBuffer();
         if (stats) stats->inputPackets++;
+    }
+}
+
+void RTW88PCIDevice::flushRxQueue()
+{
+    if (_rxQueued && _iface) {
+        _rxQueued = false;
+        _iface->flushInputQueue();
     }
 }
 
