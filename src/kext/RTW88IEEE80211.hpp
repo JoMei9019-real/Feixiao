@@ -136,7 +136,9 @@ private:
     void      sendEAPOLKey(int step, const uint8_t *replay_counter,
                             bool install, bool ack, bool mic);
     bool      sendGroupEAPOLKeyM2(const uint8_t *replay_counter,
-                                   uint16_t rx_key_info);
+                                   uint16_t rx_key_info,
+                                   uint8_t eapol_version,
+                                   uint8_t descriptor_type);
 
     /* A-MPDU BlockAck (aggregation) negotiation */
     bool      htAllowed() const;   /* HT/VHT/A-MPDU usable on this link? */
@@ -164,7 +166,7 @@ private:
     bool      txMgmtFrame(const uint8_t *frame, uint32_t len);
     bool      txNullFunc(bool powerSave);
     bool      txProbeRequest();
-    bool      txDataFrame(mbuf_t m);
+    bool      txDataFrame(mbuf_t m, bool protectEapol = false);
     struct sk_buff *mbufToSkb(mbuf_t m);
     mbuf_t    skbToMbuf(struct sk_buff *skb);
 
