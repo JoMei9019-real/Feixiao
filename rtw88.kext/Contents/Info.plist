@@ -19,10 +19,19 @@
     <string>KEXT</string>
 
     <key>CFBundleShortVersionString</key>
-    <string>1.0.7</string>
+    <string>1.0.8</string>
 
     <key>CFBundleVersion</key>
-    <string>1.0.7</string>
+    <string>1.0.8.1</string>
+
+    <key>RTW88BuildLabel</key>
+    <string>1.0.8 Developer Beta 1</string>
+
+    <key>RTW88BuildChannel</key>
+    <string>Developer Beta</string>
+
+    <key>RTW88DeveloperBeta</key>
+    <integer>1</integer>
 
     <key>CFBundleSignature</key>
     <string>????</string>
@@ -31,7 +40,7 @@
     <string>Copyright 2024 rtw88-macos. GPL-2.0 OR BSD-3-Clause</string>
 
     <key>OSBundleCompatibleVersion</key>
-    <string>1.0.7</string>
+    <string>1.0.8</string>
 
     <key>OSBundleLibraries</key>
     <dict>
