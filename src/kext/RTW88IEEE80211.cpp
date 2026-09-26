@@ -4,6 +4,7 @@
 #include "RTW88IEEE80211.hpp"
 #include "RTW88PCIDevice.hpp"
 #include "RTW88UserClient.hpp"
+#include "RTW88PeerAmpdu.h"
 
 #include <IOKit/IOLib.h>
 #include <IOKit/IOService.h>
@@ -2421,6 +2422,29 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                                     IEEE80211_HT_CAP_DSSSCCK40);
                 if (sta_band == NL80211_BAND_5GHZ)
                     _sta->deflink.vht_cap = sband->vht_cap;
+
+                const RTW88PeerAmpdu peer =
+                    rtw88ParsePeerAmpdu(_targetBSS.ies, _targetBSS.ies_len);
+                /* Honor the receive aggregation limits advertised by the AP.
+                 * If the relevant IE is absent or malformed, fall back to the
+                 * most conservative aggregate size and spacing. */
+                _sta->deflink.ht_cap.ampdu_factor =
+                    peer.has_ht ? peer.ht_factor : 0;
+                _sta->deflink.ht_cap.ampdu_density =
+                    peer.has_ht ? peer.ht_density : 7;
+                if (_sta->deflink.vht_cap.vht_supported) {
+                    const uint32_t exponentMask = 7u << 23;
+                    _sta->deflink.vht_cap.cap =
+                        (_sta->deflink.vht_cap.cap & ~exponentMask) |
+                        ((uint32_t)(peer.has_vht ? peer.vht_factor : 0) << 23);
+                }
+                rtw88_diag_log(
+                    "rtw88: AP RX aggregation limits ht_ie=%u factor=%u "
+                    "density=%u vht_ie=%u vht_factor=%u\n",
+                    (unsigned)peer.has_ht,
+                    (unsigned)_sta->deflink.ht_cap.ampdu_factor,
+                    (unsigned)_sta->deflink.ht_cap.ampdu_density,
+                    (unsigned)peer.has_vht, (unsigned)peer.vht_factor);
             }
 
             _hw->ops->sta_add(_hw, _vif, _sta);

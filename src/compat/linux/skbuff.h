@@ -27,8 +27,9 @@ struct sk_buff {
     u16       queue_mapping;  /* AC index — selects the hw TX ring (ac_to_hwq) */
     u32       ip_summed;
 
-    /* Control block — 48 bytes, used by IEEE80211/driver for private data */
-    char      cb[64] __attribute__((aligned(8)));
+    /* The macOS shim's TX metadata is larger than Linux's packed layout.
+     * Keep enough space for it without overwriting the queue list links. */
+    char      cb[128] __attribute__((aligned(8)));
 
     struct list_head list;
 

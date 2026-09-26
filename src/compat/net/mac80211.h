@@ -593,6 +593,9 @@ struct ieee80211_tx_info {
 
 static inline struct ieee80211_tx_info *IEEE80211_SKB_CB(struct sk_buff *skb)
 {
+    /* Valid in both the C core and C++ wrapper build. */
+    typedef char rtw88_tx_info_must_fit_cb[
+        sizeof(struct ieee80211_tx_info) <= sizeof(skb->cb) ? 1 : -1];
     return (struct ieee80211_tx_info *)skb->cb;
 }
 
@@ -1003,6 +1006,10 @@ static inline struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
     hw->priv = (u8 *)hw + sizeof(*hw);
     hw->wiphy = (struct wiphy *)kzalloc(sizeof(struct wiphy), GFP_KERNEL);
     if (!hw->wiphy) { kfree(hw); return NULL; }
+    /* Match cfg80211's default: length-triggered RTS is disabled. Leaving
+     * this zero makes rtw_tx_data_pkt_info_update request RTS for every
+     * nonempty data frame, including TCP ACKs. Explicit use_rts still works. */
+    hw->wiphy->rts_threshold = (u32)-1;
     /* Store rtwdev (= hw->priv) at wiphy offset 0 so that
      * wiphy_to_ieee80211_hw can return (ieee80211_hw*)wiphy
      * and callers reading hw->priv (offset 0) get rtwdev. */
