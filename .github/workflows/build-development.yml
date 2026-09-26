@@ -43,7 +43,7 @@ jobs:
           test -f Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
           test -x Feixiao/build/out/rtw88ctl
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
-          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.0.8.1"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.0.8"
 
       - name: Package
         run: |
