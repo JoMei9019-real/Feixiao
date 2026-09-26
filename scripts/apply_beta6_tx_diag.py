@@ -4,10 +4,10 @@ from pathlib import Path
 p = Path("../rtw88-stable/drivers/net/wireless/realtek/rtw88/tx.c")
 s = p.read_text()
 
-needle = """	/* maybe merge with tx status ? */
+needle = r"""	/* maybe merge with tx status ? */
 	rtw_tx_stats(rtwdev, vif, skb);
 }"""
-repl = """	/* Beta 6 diagnostics: sample the exact values handed to the Realtek TX
+repl = r"""	/* Beta 6 diagnostics: sample the exact values handed to the Realtek TX
 	 * descriptor builder. First 16 data frames are logged, then every 64th.
 	 * This is intentionally rate-limited so diagnostics do not become the
 	 * throughput bottleneck themselves. */
@@ -52,11 +52,11 @@ if needle not in s:
     raise SystemExit("tx.c pkt_info insertion point not found")
 s = s.replace(needle, repl, 1)
 
-needle2 = """	if (pkt_info->tim_offset)
+needle2 = r"""	if (pkt_info->tim_offset)
 		tx_desc->w9 |= le32_encode_bits(1, RTW_TX_DESC_W9_TIM_EN) |
 			       le32_encode_bits(pkt_info->tim_offset, RTW_TX_DESC_W9_TIM_OFFSET);
 }"""
-repl2 = """	if (pkt_info->tim_offset)
+repl2 = r"""	if (pkt_info->tim_offset)
 		tx_desc->w9 |= le32_encode_bits(1, RTW_TX_DESC_W9_TIM_EN) |
 			       le32_encode_bits(pkt_info->tim_offset, RTW_TX_DESC_W9_TIM_OFFSET);
 
