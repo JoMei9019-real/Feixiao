@@ -1,0 +1,61 @@
+name: Build Development
+
+on:
+  push:
+    branches:
+      - development
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Feixiao
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: Feixiao
+
+      - name: Clone rtw88-stable
+        run: git clone --depth 1 https://github.com/thegwchr/rtw88-stable.git
+
+      - name: Download firmware blobs
+        run: |
+          cd Feixiao/firmware
+          for fw in rtw8822b_fw.bin rtw8822c_fw.bin rtw8821c_fw.bin \
+                    rtw8821a_fw.bin rtw8812a_fw.bin rtw8814a_fw.bin; do
+            if [ ! -s "$fw" ]; then
+              curl -fL --retry 3 -o "$fw" \
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw"
+            fi
+          done
+
+      - name: Build
+        run: make all
+        working-directory: Feixiao
+
+      - name: Validate
+        run: |
+          test -f Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
+          test -x Feixiao/build/out/rtw88ctl
+          plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
+
+      - name: Package
+        run: |
+          mkdir -p Development
+          cp -R Feixiao/build/out/rtw88.kext Development/
+          cp Feixiao/build/out/rtw88ctl Development/
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-Development.zip
+          shasum -a 256 Feixiao-Development.zip > Feixiao-Development.zip.sha256
+
+      - name: Upload development artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feixiao-Development
+          path: |
+            Feixiao-Development.zip
+            Feixiao-Development.zip.sha256
