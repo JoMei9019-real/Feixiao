@@ -3144,17 +3144,41 @@ bool RTW88IEEE80211::htAllowed() const
 
 void RTW88IEEE80211::startTxAggregation()
 {
-    if (_txBaActive) return;
-    if (!htAllowed()) return;
-    if (!_sta || !_sta->deflink.ht_cap.ht_supported) return;
+    const bool ht_ok = htAllowed();
+    const bool sta_present = (_sta != nullptr);
+    const bool ht_supported = sta_present && _sta->deflink.ht_cap.ht_supported;
+
+    rtw88_diag_log(
+        "rtw88: TX AGG start called active=%d htAllowed=%d sta=%d ht_supported=%d "
+        "retry=%u tid=%u state=%u\n",
+        _txBaActive ? 1 : 0, ht_ok ? 1 : 0, sta_present ? 1 : 0,
+        ht_supported ? 1 : 0, _baRetryCount, _baTid, (unsigned)_state);
+
+    if (_txBaActive) {
+        rtw88_diag_log("rtw88: TX AGG skip: already active\n");
+        return;
+    }
+    if (!ht_ok) {
+        rtw88_diag_log("rtw88: TX AGG skip: htAllowed=0 cipher=0x%08x group=0x%08x\n",
+                       _targetBSS.cipher, _targetBSS.group_cipher);
+        return;
+    }
+    if (!sta_present) {
+        rtw88_diag_log("rtw88: TX AGG skip: station missing\n");
+        return;
+    }
+    if (!ht_supported) {
+        rtw88_diag_log("rtw88: TX AGG skip: peer HT unsupported\n");
+        return;
+    }
     if (_baRetryCount >= 5) {
-        IOLog("rtw88: TX ADDBA timed out after %u attempts (tid=%u)\n",
-              _baRetryCount, _baTid);
+        rtw88_diag_log("rtw88: TX ADDBA timed out after %u attempts (tid=%u)\n",
+                       _baRetryCount, _baTid);
         return;
     }
     _baRetryCount++;
-    IOLog("rtw88: TX ADDBA attempt %u/5 (tid=%u)\n",
-          _baRetryCount, _baTid);
+    rtw88_diag_log("rtw88: TX ADDBA attempt %u/5 (tid=%u)\n",
+                   _baRetryCount, _baTid);
     sendAddbaRequest(_baTid);
     if (_addbaRetryTimer)
         _addbaRetryTimer->setTimeoutMS(500);
@@ -3184,8 +3208,8 @@ void RTW88IEEE80211::handleBackAction(const uint8_t *b, uint32_t len)
         uint16_t ssn       = (uint16_t)(ssc >> 4);
         rxBaSetup(tid, ssn, bufsz);
         sendAddbaResponse(tid, dialog, req_param, ba_to);
-        IOLog("rtw88: RX ADDBA request (tid=%u ssn=%u buf=%u) — accepted, "
-              "downlink A-MPDU on\n", tid, ssn, bufsz);
+        rtw88_diag_log("rtw88: RX ADDBA request (tid=%u ssn=%u buf=%u) — accepted, "
+                       "downlink A-MPDU on\n", tid, ssn, bufsz);
         break;
     }
     case WLAN_ACTION_ADDBA_RESP: {
@@ -3198,9 +3222,9 @@ void RTW88IEEE80211::handleBackAction(const uint8_t *b, uint32_t len)
             _txBaActive = true;
             if (_addbaRetryTimer)
                 _addbaRetryTimer->cancelTimeout();
-            IOLog("rtw88: TX ADDBA accepted (tid=%u) — uplink A-MPDU on\n", tid);
+            rtw88_diag_log("rtw88: TX ADDBA accepted (tid=%u) — uplink A-MPDU on\n", tid);
         } else {
-            IOLog("rtw88: TX ADDBA rejected status=%u tid=%u\n", status, tid);
+            rtw88_diag_log("rtw88: TX ADDBA rejected status=%u tid=%u\n", status, tid);
         }
         break;
     }
@@ -3216,7 +3240,7 @@ void RTW88IEEE80211::handleBackAction(const uint8_t *b, uint32_t len)
             _txBaActive = false;
         if (initiator)
             rxBaTeardown(tid);
-        IOLog("rtw88: RX DELBA tid=%u initiator=%d\n", tid, initiator);
+        rtw88_diag_log("rtw88: RX DELBA tid=%u initiator=%d\n", tid, initiator);
         break;
     }
     default:
