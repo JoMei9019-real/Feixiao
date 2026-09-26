@@ -13,8 +13,8 @@ jobs:
   build-release:
     runs-on: macos-latest
     env:
-      TAG: v1.0.7-alpha.1-diagnostics
-      RELEASE_NAME: Feixiao Alpha 1.0.7 Diagnostics
+      TAG: v1.0.7-alpha.2
+      RELEASE_NAME: Feixiao Alpha 1.0.7 Alpha 2
 
     steps:
       - name: Checkout Feixiao
@@ -54,20 +54,20 @@ jobs:
           cp -R Feixiao/build/out/rtw88.kext release/
           cp Feixiao/build/out/rtw88ctl release/
           cp Feixiao/ALPHA-1.0.7-DIAGNOSTICS.md release/README-ALPHA.md
-          ditto -c -k --sequesterRsrc --keepParent release Feixiao-Alpha-1.0.7-Diagnostics.zip
-          shasum -a 256 Feixiao-Alpha-1.0.7-Diagnostics.zip > Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent release Feixiao-Alpha-1.0.7-alpha.2.zip
+          shasum -a 256 Feixiao-Alpha-1.0.7-alpha.2.zip > Feixiao-Alpha-1.0.7-alpha.2.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" Feixiao-Alpha-1.0.7-Diagnostics.zip \
-              Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" Feixiao-Alpha-1.0.7-alpha.2.zip \
+              Feixiao-Alpha-1.0.7-alpha.2.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$TAG" \
-              Feixiao-Alpha-1.0.7-Diagnostics.zip \
-              Feixiao-Alpha-1.0.7-Diagnostics.zip.sha256 \
+              Feixiao-Alpha-1.0.7-alpha.2.zip \
+              Feixiao-Alpha-1.0.7-alpha.2.zip.sha256 \
               --target "$GITHUB_SHA" \
               --prerelease \
               --repo "$GITHUB_REPOSITORY" \
