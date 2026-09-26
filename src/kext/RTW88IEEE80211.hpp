@@ -147,6 +147,7 @@ private:
     void      sendAddbaResponse(uint8_t tid, uint8_t dialog,
                                 uint16_t req_param, uint16_t ba_timeout);
     void      handleBackAction(const uint8_t *b, uint32_t len);
+    static void addbaRetryFired(OSObject *owner, IOTimerEventSource *t);
 
     /* RX A-MPDU reorder + delivery */
     void      deliverDataFrame(struct sk_buff *skb);   /* strip 802.11, inject */
@@ -248,6 +249,8 @@ private:
     uint8_t  _connChanWidth = 20;  /* negotiated operating width: 20/40/80 MHz */
     uint8_t  _baDialog   = 0;      /* rolling ADDBA-request dialog token       */
     uint16_t _baBufSize  = 64;     /* advertised BlockAck buffer/window size   */
+    uint8_t  _baRetryCount = 0;
+    IOTimerEventSource *_addbaRetryTimer = nullptr;
 
     /* RX A-MPDU reorder buffer — one per TID with an active downlink BA.
      * Touched from the RX workloop (frame input) and the IEEE80211 workloop

@@ -577,6 +577,11 @@ bool RTW88IEEE80211::init(RTW88PCIDevice *dev, struct pci_dev *pci)
     if (!_timer) return false;
     _wl->addEventSource(_timer);
 
+    _addbaRetryTimer = IOTimerEventSource::timerEventSource(this,
+        &RTW88IEEE80211::addbaRetryFired);
+    if (!_addbaRetryTimer) return false;
+    _wl->addEventSource(_addbaRetryTimer);
+
     /* RX A-MPDU reorder: lock + hole-flush timer.  The timer lives on the
      * RX/interrupt workloop (not _wl) so reorder-released frames and normal RX
      * frames are delivered from the same thread — injectRxFrame's queue+flush
@@ -609,6 +614,7 @@ void RTW88IEEE80211::free()
     _manualScanAbort = true;
     if (_manualScanTC) { thread_call_cancel(_manualScanTC); thread_call_free(_manualScanTC); _manualScanTC = nullptr; }
     if (_connectTC) { thread_call_cancel(_connectTC); thread_call_free(_connectTC); _connectTC = nullptr; }
+    if (_addbaRetryTimer) { _addbaRetryTimer->cancelTimeout(); _wl->removeEventSource(_addbaRetryTimer); _addbaRetryTimer->release(); _addbaRetryTimer = nullptr; }
     if (_timer)  { _wl->removeEventSource(_timer); _timer->release();  _timer = nullptr; }
     if (_gate)   { _wl->removeEventSource(_gate);  _gate->release();   _gate = nullptr; }
     if (_wl)     { _wl->release();   _wl = nullptr; }
@@ -661,6 +667,9 @@ void RTW88IEEE80211::releaseSta()
     _sta = nullptr;
     _staAllocSize = 0;
     _txBaActive = false;
+    _baRetryCount = 0;
+    if (_addbaRetryTimer)
+        _addbaRetryTimer->cancelTimeout();
     _dataSeq = 0;
     rxBaTeardownAll();
 }
@@ -1765,11 +1774,6 @@ void RTW88IEEE80211::rxReorderFlushStale()
 
     for (uint32_t i = 0; i < nout; i++)
         deliverDataFrame(out[i]);
-
-    /* Frames released by the reorder timer do not run through the PCI
-     * interrupt handler, so flush their queued macOS input batch here. */
-    if (_parent && nout)
-        _parent->flushRxQueue();
 
     if (again)
         rxReorderArmTimer();
@@ -3040,7 +3044,7 @@ bool RTW88IEEE80211::txMgmtFrame(const uint8_t *frame, uint32_t len)
 
     struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
     memset(info, 0, sizeof(*info));
-    info->flags  = IEEE80211_TX_CTL_FIRST_FRAGMENT | IEEE80211_TX_CTL_NO_ACK;
+    info->flags  = IEEE80211_TX_CTL_FIRST_FRAGMENT;
     info->control.vif = _vif;
 
     struct ieee80211_tx_control ctrl = { .sta = nullptr };
@@ -3143,8 +3147,24 @@ void RTW88IEEE80211::startTxAggregation()
     if (_txBaActive) return;
     if (!htAllowed()) return;
     if (!_sta || !_sta->deflink.ht_cap.ht_supported) return;
-    IOLog("rtw88: starting TX A-MPDU — sending ADDBA request (tid=%u)\n", _baTid);
+    if (_baRetryCount >= 5) {
+        IOLog("rtw88: TX ADDBA timed out after %u attempts (tid=%u)\n",
+              _baRetryCount, _baTid);
+        return;
+    }
+    _baRetryCount++;
+    IOLog("rtw88: TX ADDBA attempt %u/5 (tid=%u)\n",
+          _baRetryCount, _baTid);
     sendAddbaRequest(_baTid);
+    if (_addbaRetryTimer)
+        _addbaRetryTimer->setTimeoutMS(500);
+}
+
+void RTW88IEEE80211::addbaRetryFired(OSObject *owner, IOTimerEventSource *)
+{
+    RTW88IEEE80211 *self = OSDynamicCast(RTW88IEEE80211, owner);
+    if (self && self->_state == RTW88_STATE_CONNECTED && !self->_txBaActive)
+        self->startTxAggregation();
 }
 
 void RTW88IEEE80211::handleBackAction(const uint8_t *b, uint32_t len)
@@ -3176,6 +3196,8 @@ void RTW88IEEE80211::handleBackAction(const uint8_t *b, uint32_t len)
         uint8_t  tid    = (uint8_t)((param >> 2) & 0xf);
         if (status == 0 && tid == _baTid) {
             _txBaActive = true;
+            if (_addbaRetryTimer)
+                _addbaRetryTimer->cancelTimeout();
             IOLog("rtw88: TX ADDBA accepted (tid=%u) — uplink A-MPDU on\n", tid);
         } else {
             IOLog("rtw88: TX ADDBA rejected status=%u tid=%u\n", status, tid);

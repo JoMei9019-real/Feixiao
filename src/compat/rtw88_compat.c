@@ -470,6 +470,46 @@ static void rtw88_napi_thread_wrapper(thread_call_param_t param0, thread_call_pa
     }
 }
 
+void rtw88_napi_enable(struct napi_struct *napi)
+{
+    if (napi)
+        __atomic_store_n(&napi->running, 0, __ATOMIC_RELEASE);
+}
+
+void rtw88_napi_disable(struct napi_struct *napi)
+{
+    if (!napi)
+        return;
+    if (napi->thread_call)
+        thread_call_cancel_wait((thread_call_t)napi->thread_call);
+    __atomic_store_n(&napi->running, 0, __ATOMIC_RELEASE);
+}
+
+void rtw88_napi_complete(struct napi_struct *napi)
+{
+    if (napi)
+        __atomic_store_n(&napi->running, 0, __ATOMIC_RELEASE);
+}
+
+int rtw88_napi_complete_done(struct napi_struct *napi, int work)
+{
+    rtw88_napi_complete(napi);
+    return 1;
+}
+
+int rtw88_napi_reschedule(struct napi_struct *napi)
+{
+    rtw88_napi_complete(napi);
+    rtw88_napi_schedule(napi);
+    return 1;
+}
+
+void rtw88_napi_synchronize(struct napi_struct *napi)
+{
+    if (napi && napi->thread_call)
+        thread_call_cancel_wait((thread_call_t)napi->thread_call);
+}
+
 void rtw88_netif_napi_add(struct net_device *dev, struct napi_struct *napi, int (*poll_fn)(struct napi_struct *, int))
 {
     napi->dev = dev;
@@ -496,7 +536,10 @@ void rtw88_netif_napi_del(struct napi_struct *napi)
 void rtw88_napi_schedule(struct napi_struct *napi)
 {
     if (napi && napi->poll && napi->thread_call) {
-        thread_call_enter((thread_call_t)napi->thread_call);
+        int idle = 0;
+        if (__atomic_compare_exchange_n(&napi->running, &idle, 1, false,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            thread_call_enter((thread_call_t)napi->thread_call);
     }
 }
 

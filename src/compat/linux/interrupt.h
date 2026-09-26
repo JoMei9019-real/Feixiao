@@ -69,27 +69,33 @@ struct napi_struct {
     struct net_device *dev;
     int (*poll)(struct napi_struct *, int);
     int weight;
-    int running;
+    volatile int running;
     void *thread_call;
 };
 
 void rtw88_netif_napi_add(struct net_device *dev, struct napi_struct *napi, int (*poll_fn)(struct napi_struct *, int));
 #define netif_napi_add rtw88_netif_napi_add
 
-static inline void napi_enable(struct napi_struct *napi) {}
-static inline void napi_disable(struct napi_struct *napi) {}
+void rtw88_napi_enable(struct napi_struct *napi);
+void rtw88_napi_disable(struct napi_struct *napi);
+#define napi_enable rtw88_napi_enable
+#define napi_disable rtw88_napi_disable
 
 void rtw88_napi_schedule(struct napi_struct *napi);
 #define napi_schedule rtw88_napi_schedule
 
-static inline void napi_complete(struct napi_struct *napi) {}
-static inline int napi_reschedule(struct napi_struct *napi) { return 0; }
-static inline void napi_synchronize(struct napi_struct *napi) {}
+void rtw88_napi_complete(struct napi_struct *napi);
+int rtw88_napi_reschedule(struct napi_struct *napi);
+void rtw88_napi_synchronize(struct napi_struct *napi);
+#define napi_complete rtw88_napi_complete
+#define napi_reschedule rtw88_napi_reschedule
+#define napi_synchronize rtw88_napi_synchronize
 
 void rtw88_netif_napi_del(struct napi_struct *napi);
 #define netif_napi_del rtw88_netif_napi_del
 
-static inline int napi_complete_done(struct napi_struct *napi, int work) { return 1; }
+int rtw88_napi_complete_done(struct napi_struct *napi, int work);
+#define napi_complete_done rtw88_napi_complete_done
 
 extern irq_handler_t g_irq_handler;
 extern irq_handler_t g_irq_thread_fn;
