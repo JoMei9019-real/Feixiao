@@ -1075,13 +1075,22 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
                     memcmp(h3->addr3, _targetBSS.bssid, 6) == 0 ||
                     memcmp(h3->addr2, _targetBSS.bssid, 6) == 0;
 
-                rtw88_diag_log(
-                    "rtw88: action frame category=%u action=%u len=%u "
-                    "from=%02x:%02x:%02x:%02x:%02x:%02x target=%d\n",
-                    category, action, blen,
-                    h3->addr2[0], h3->addr2[1], h3->addr2[2],
-                    h3->addr2[3], h3->addr2[4], h3->addr2[5],
-                    fromTarget ? 1 : 0);
+                /* Persist only action frames that are relevant to the active
+                 * connection or to BlockAck/11k/11v diagnostics. Nearby
+                 * vendor-specific category 127 traffic can otherwise overwrite
+                 * the small rtw88ctl log ring within seconds. */
+                if (fromTarget ||
+                    category == WLAN_CATEGORY_BACK ||
+                    category == WLAN_CATEGORY_RADIO_MEASUREMENT ||
+                    category == WLAN_CATEGORY_WNM) {
+                    rtw88_diag_log(
+                        "rtw88: action frame category=%u action=%u len=%u "
+                        "from=%02x:%02x:%02x:%02x:%02x:%02x target=%d\n",
+                        category, action, blen,
+                        h3->addr2[0], h3->addr2[1], h3->addr2[2],
+                        h3->addr2[3], h3->addr2[4], h3->addr2[5],
+                        fromTarget ? 1 : 0);
+                }
 
                 /* 802.11v: WNM BSS Transition Management Request.
                  *
