@@ -1766,6 +1766,11 @@ void RTW88IEEE80211::rxReorderFlushStale()
     for (uint32_t i = 0; i < nout; i++)
         deliverDataFrame(out[i]);
 
+    /* Frames released by the reorder timer do not run through the PCI
+     * interrupt handler, so flush their queued macOS input batch here. */
+    if (_parent && nout)
+        _parent->flushRxQueue();
+
     if (again)
         rxReorderArmTimer();
 }
