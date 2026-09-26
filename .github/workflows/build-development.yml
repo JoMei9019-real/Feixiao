@@ -50,27 +50,27 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-2.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-2.zip > Feixiao-1.0.8-Beta-2.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-3.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-3.zip > Feixiao-1.0.8-Beta-3.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-2
+          name: Feixiao-1.0.8-Beta-3
           path: |
-            Feixiao-1.0.8-Beta-2.zip
-            Feixiao-1.0.8-Beta-2.zip.sha256
+            Feixiao-1.0.8-Beta-3.zip
+            Feixiao-1.0.8-Beta-3.zip.sha256
 
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.2" \
-            "Feixiao-1.0.8-Beta-2.zip" \
-            "Feixiao-1.0.8-Beta-2.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 2" \
-            --notes "Development prerelease. Includes the RX input-queue batching experiment on top of the current 1.0.7 stable baseline. Intended for testing; main remains the stable branch." \
+          gh release create "v1.0.8-beta.3" \
+            "Feixiao-1.0.8-Beta-3.zip" \
+            "Feixiao-1.0.8-Beta-3.zip.sha256" \
+            --title "Feixiao 1.0.8 Beta 3" \
+            --notes "Development prerelease. Includes the RX input-queue batching experiment and an earlier TX backpressure test (stall below 160 free BE slots, resume at 208) on top of the current 1.0.7 stable baseline. Intended for testing; main remains the stable branch." \
             --prerelease \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}"
