@@ -3464,6 +3464,29 @@ bool RTW88IEEE80211::txDataFrame(mbuf_t m, bool protectEapol)
      * the rekey acknowledgement and eventually deauthenticate with reason 16. */
     if (qos && _txBaActive && !isEapol)
         info->flags |= IEEE80211_TX_CTL_AMPDU;
+
+    /* Beta 6 wrapper-side TX sample.  Pair this with core TXDIAG/TXDESC to
+     * prove whether metadata changes between the macOS wrapper and rtw88. */
+    {
+        static uint32_t beta6WrapTxCount = 0;
+        uint32_t n = ++beta6WrapTxCount;
+        if (n <= 16 || (n & 63u) == 0) {
+            rtw88_diag_log(
+                "rtw88: TXWRAP n=%u eth=0x%04x ethlen=%u framelen=%u qos=%u "
+                "protected=%u eapol=%u ba=%u ampdu_flag=%u chan=%u width=%u "
+                "ht=%u vht=%u ht_factor=%u ht_density=%u sta_bw=%u\n",
+                n, ethertype, (unsigned)total, framelen, qos ? 1 : 0,
+                protected_frame ? 1 : 0, isEapol ? 1 : 0,
+                _txBaActive ? 1 : 0,
+                (info->flags & IEEE80211_TX_CTL_AMPDU) ? 1 : 0,
+                (unsigned)_targetBSS.channel, (unsigned)_connChanWidth,
+                (unsigned)_sta->deflink.ht_cap.ht_supported,
+                (unsigned)_sta->deflink.vht_cap.vht_supported,
+                (unsigned)_sta->deflink.ht_cap.ampdu_factor,
+                (unsigned)_sta->deflink.ht_cap.ampdu_density,
+                (unsigned)_sta->deflink.bandwidth);
+        }
+    };
     info->band  = (_targetBSS.channel > 14) ? NL80211_BAND_5GHZ
                                             : NL80211_BAND_2GHZ;
     info->control.vif = _vif;
