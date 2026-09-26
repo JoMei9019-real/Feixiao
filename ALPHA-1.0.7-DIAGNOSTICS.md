@@ -1,33 +1,33 @@
-# Feixiao Alpha 1.0.7 Diagnostics
+# Feixiao Alpha 1.0.7
 
-Performance-instrumentation build based on Alpha 1.0.6.
+Group-key rekey reliability fix plus performance diagnostics, based on Alpha 1.0.6.
 
-## Goal
+## Group-key rekey fix
 
-Investigate the remaining low-bandwidth problem without changing the Wi-Fi data path.
+A captured failure showed repeated RSN Group Key Handshake message 1/2 frames followed by AP deauthentication with reason 16 (group key update timeout). Alpha 1.0.7 changes only the acknowledgement path after the PTK already exists:
 
-The diagnostics are informed by upstream Feixiao issue #2 and by the
-chvsolucoes/Feixiao performance experiments. In particular, this build tracks
-TX queue/backpressure behavior together with RX delivery and the existing
-hardware/software ring pointers.
+- Send Group M2 through the pairwise-protected CCMP data path.
+- Never mark EAPOL control frames for TX A-MPDU aggregation.
+- Mirror the received EAPOL version and key descriptor type in Group M2.
+- Log Group M2 key-info and replay counter before transmit.
+- Detect retransmitted Group M1 frames and resend M2 without reinstalling the same GTK.
+- Reject stale Group M1 replay counters.
+- Keep unrelated vendor-specific category-127 action traffic out of the persistent rtw88ctl ring unless it comes from the connected AP.
 
-## Changes
+The initial WPA2 4-way handshake path is otherwise unchanged.
 
-- Keep the Alpha 1.0.6 WPA2/WPA3 transition fallback and Group Key Rekey work.
-- Add 5-second PERF snapshots:
-  - submitted TX packets
-  - delivered RX packets and bytes
-  - interrupt count
-  - cumulative TX stall/resume count
-  - BE ring available slots
-  - current stalled state
-- Persist TXSTATE diagnostics into the rtw88ctl log ring.
-- Emit TXSTATE every 5 seconds so RX_rp/RX_hwwp and HW/SW TX ring movement can
-  be correlated with throughput tests.
-- Keep the normal per-packet RX flush path.
-- Do not enable RX batching.
-- Do not change DMA, watchdog, rate adaptation, A-MPDU, VHT channel width,
-  backpressure thresholds, firmware control, or interrupt behavior.
+## Performance diagnostics
+
+The existing diagnostics from the low-bandwidth investigation remain enabled. They were informed by upstream Feixiao issue #2 and the chvsolucoes/Feixiao performance experiments, but do not enable the fork's RX batching or aggressive DMA/watchdog experiments.
+
+Every 5 seconds the driver records:
+
+- submitted TX packets
+- delivered RX packets and bytes
+- interrupt count
+- cumulative TX stall/resume count
+- BE ring available slots
+- HW/SW TX ring state and RX read/write pointers
 
 ## Test
 
@@ -35,11 +35,8 @@ Enable debug logging:
 
     sudo rtw88ctl debug 3
 
-Run a speed test or a sustained transfer for at least 20-30 seconds, then:
+After the connection has been up long enough for a group rekey, inspect:
 
-    sudo rtw88ctl log | grep -Ei 'PERF 5s|TXSTATE|deauth|disassoc|group rekey|EAPOL'
+    sudo rtw88ctl log | grep -Ei 'groupM1|group M2 tx|group rekey|reason=16|deauth|disassoc|PERF 5s|TXSTATE|EAPOL'
 
-For latency correlation, run a router ping in parallel.
-
-This branch is diagnostics-only. Its measurements should guide a later,
-single-variable A/B performance patch.
+A successful rekey should show a Group M1, one Group M2 transmit, and no later reason=16 deauthentication.
