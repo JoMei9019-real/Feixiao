@@ -193,6 +193,63 @@ if stbc_old in tx:
 elif stbc_new not in tx:
     raise SystemExit("tx.c STBC insertion point not found")
 
+# Beta 16: cap sparse TX-status diagnostics so enabling diagnostics can never
+# build a large tx_report queue.  This is a diagnostic path only.
+report_anchor = """static void rtw_tx_report_enable(struct rtw_dev *rtwdev,
+				 struct rtw_tx_pkt_info *pkt_info)
+{
+	struct rtw_tx_report *tx_report = &rtwdev->tx_report;
+
+	/* [11:8], reserved, fills with zero
+	 * [7:2],  tx report sequence number
+	 * [1:0],  firmware use, fills with zero
+	 */
+	pkt_info->sn = (atomic_inc_return(&tx_report->sn) << 2) & 0xfc;
+	pkt_info->report = true;
+}
+"""
+report_replacement = report_anchor + """
+bool rtw88_beta16_tx_report_can_sample(struct rtw_dev *rtwdev)
+{
+	struct rtw_tx_report *tx_report;
+	unsigned long flags;
+	u32 pending;
+
+	if (!rtwdev)
+		return false;
+
+	tx_report = &rtwdev->tx_report;
+	spin_lock_irqsave(&tx_report->q_lock, flags);
+	pending = skb_queue_len(&tx_report->queue);
+	spin_unlock_irqrestore(&tx_report->q_lock, flags);
+
+	return pending < 8;
+}
+"""
+if "bool rtw88_beta16_tx_report_can_sample(" not in tx:
+    if report_anchor not in tx:
+        raise SystemExit("tx.c report helper insertion point not found")
+    tx = tx.replace(report_anchor, report_replacement, 1)
+
+req_anchor = """\tif (info->flags & IEEE80211_TX_CTL_REQ_TX_STATUS)
+\t\trtw_tx_report_enable(rtwdev, pkt_info);
+"""
+req_replacement = """\tif (info->flags & IEEE80211_TX_CTL_REQ_TX_STATUS) {
+\t\tif (rtw88_beta16_tx_report_can_sample(rtwdev)) {
+\t\t\trtw_tx_report_enable(rtwdev, pkt_info);
+\t\t} else {
+\t\t\t/* Hard cap: do not leave REQ_TX_STATUS set, otherwise pci.c
+\t\t\t * would enqueue the skb even though no firmware report was requested. */
+\t\t\tinfo->flags &= ~IEEE80211_TX_CTL_REQ_TX_STATUS;
+\t\t}
+\t}
+"""
+if req_anchor in tx:
+    tx = tx.replace(req_anchor, req_replacement, 1)
+elif "Hard cap: do not leave REQ_TX_STATUS set" not in tx:
+    raise SystemExit("tx.c TX status cap insertion point not found")
+
+
 # Runtime fixed-rate diagnostic for RTL8821CE unicast data only.
 rate_anchor = """\tfix_rate = dm_info->fix_rate;
 \tif (fix_rate < DESC_RATE_MAX) {
