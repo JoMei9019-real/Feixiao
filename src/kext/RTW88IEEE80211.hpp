@@ -180,6 +180,10 @@ private:
     static void timerFired(OSObject *owner, IOTimerEventSource *timer);
     void        onTimer();
 
+    /* Safe periodic RSSI -> firmware RA refresh. */
+    static void rssiTimerFired(OSObject *owner, IOTimerEventSource *timer);
+    void        refreshRateControlRssi();
+
     /* Connect thread_call — runs doAuthenticate off the IOUserClient thread */
     static void connectTCFn(thread_call_param_t self, thread_call_param_t);
     thread_call_t _connectTC = nullptr;
@@ -201,6 +205,7 @@ private:
     IOWorkLoop         *_wl           = nullptr;
     IOCommandGate      *_gate         = nullptr;
     IOTimerEventSource *_timer        = nullptr;
+    IOTimerEventSource *_rssiTimer    = nullptr;
     IOLock             *_lock         = nullptr;
 
     RTW88State          _state        = RTW88_STATE_IDLE;
