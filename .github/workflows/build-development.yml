@@ -1,4 +1,4 @@
-name: Build Release Candidate
+name: Build Development
 
 on:
   push:
@@ -62,7 +62,7 @@ jobs:
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
           test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.1.0"
           test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0 Development"
-          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 RC0"
+          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 Development"
 
       - name: Package
         run: |
