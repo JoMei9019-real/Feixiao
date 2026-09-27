@@ -383,6 +383,12 @@ static void *g_kext_hw = NULL;
 /* Forward declaration — defined later in ieee80211_alloc_hw section */
 static struct ieee80211_hw *g_rtw88_hw;
 
+/* Feixiao exposes one station-mode VIF and one associated peer. Keep these
+ * globals visible to both rtw88 iterator callbacks and the mac80211 lookup
+ * shims below. Static storage gives them a guaranteed NULL initial value. */
+static struct ieee80211_vif *g_rtw88_vif;
+static struct ieee80211_sta *g_rtw88_sta;
+
 irq_handler_t g_irq_handler = NULL;
 irq_handler_t g_irq_thread_fn = NULL;
 void *g_irq_dev_id = NULL;
@@ -815,11 +821,6 @@ void ieee80211_queue_delayed_work(struct ieee80211_hw *hw,
 /* ------------------------------------------------------------------ */
 /*  mac80211 stubs                                                      */
 /* ------------------------------------------------------------------ */
-
-/* Single station-mode peer used by the lightweight mac80211 compatibility
- * layer.  Definitions live in the callback/global-state section below. */
-static struct ieee80211_vif *g_rtw88_vif;
-static struct ieee80211_sta *g_rtw88_sta;
 
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
                                           const u8 *addr)
