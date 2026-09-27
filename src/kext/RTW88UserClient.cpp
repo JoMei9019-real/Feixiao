@@ -46,6 +46,9 @@ const IOExternalMethodDispatch RTW88UserClient::sMethods[kRTW88NumSelectors] = {
     /* kRTW88PowerOff */
     { (IOExternalMethodAction)&RTW88UserClient::sPowerOff,
       0, 0, 0, 0 },
+    /* kRTW88SetRateMode: input scalar = 0(auto), 5(MCS5), 7(MCS7) */
+    { (IOExternalMethodAction)&RTW88UserClient::sSetRateMode,
+      1, 0, 0, 0 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -257,4 +260,14 @@ IOReturn RTW88UserClient::sPowerOff(RTW88UserClient *uc, void *ref,
 {
     if (!uc->_provider || !uc->_provider->get80211()) return kIOReturnOffline;
     return uc->_provider->get80211()->cmdPowerOff();
+}
+
+IOReturn RTW88UserClient::sSetRateMode(RTW88UserClient *uc, void *ref,
+                                       IOExternalMethodArguments *args)
+{
+    if (!args || args->scalarInputCount < 1)
+        return kIOReturnBadArgument;
+    int mode = (int)args->scalarInput[0];
+    int ret = rtw88_beta15b_set_rate_mode(mode);
+    return ret == 0 ? kIOReturnSuccess : kIOReturnBadArgument;
 }
