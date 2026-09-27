@@ -1,6 +1,9 @@
-name: Build Development
+name: Build Release Candidate
 
 on:
+  push:
+    branches:
+      - development
   workflow_dispatch:
 
 permissions:
@@ -58,13 +61,15 @@ jobs:
           test -x Feixiao/build/out/rtw88ctl
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
           test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.0.8"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.0.8 RC1"
+          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.0.8 RC1"
 
       - name: Package
         run: |
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-16.zip
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-RC1.zip
           shasum -a 256 Feixiao-1.0.8-Beta-16.zip > Feixiao-1.0.8-Beta-16.zip.sha256
 
       - name: Upload development artifact
@@ -79,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v1.0.8-beta.16"
+          TAG="v1.0.8-rc.1"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               "Feixiao-1.0.8-Beta-16.zip" \
@@ -87,8 +92,8 @@ jobs:
               --clobber \
               --repo "${{ github.repository }}"
             gh release edit "$TAG" \
-              --title "Feixiao 1.0.8 Beta 16" \
-              --notes "Development prerelease. Beta 16 promotes the successful RTL8821CE performance fix from Beta 15b: firmware auto rate adaptation is the default and TX STBC is forced off for RTL8821CE. Detailed diagnostics are retained but are disabled by default; use 'rtw88ctl diag on' to enable them and 'rtw88ctl diag off' to disable them without rebooting. The diagnostics flag uses atomic visibility, TX-status sampling is reduced to 1/512 data frames, and the TXRPT queue is hard-capped below 8 pending samples so diagnostics cannot create the large pending queues seen during Beta 16 validation. The optional 'rate mcs5/mcs7' diagnostic modes remain available, while 'rate auto' is the boot default. WPA duplicate-M3 handling, AP disconnect cleanup, corrected RSSI EWMA, stable RA mask behavior and PHYINFO feedback are retained. Main remains stable." \
+              --title "Feixiao 1.0.8 RC1" \
+              --notes "Release Candidate for Feixiao 1.0.8. RC1 is based on the validated Beta 16 data path: RTL8821CE uses firmware automatic rate adaptation by default with TX STBC disabled, while the WPA duplicate-M3 fix, AP disconnect cleanup, corrected RSSI EWMA, stable RA-mask handling, PHYINFO feedback, SGI and A-MPDU support remain unchanged. Detailed diagnostics stay available through 'rtw88ctl diag on|off' but are disabled by default; TX-status sampling is reduced and capped so diagnostics cannot build an unbounded TXRPT queue. New in RC1: 'rtw88ctl version' reports both the control utility and loaded driver build, runtime diagnostics/rate state, CLI debug noise from network listing has been removed, and release metadata/documentation have been polished. This is a prerelease candidate for final 1.0.8; main remains stable." \
               --prerelease \
               --target "${{ github.sha }}" \
               --repo "${{ github.repository }}"
@@ -96,8 +101,8 @@ jobs:
             gh release create "$TAG" \
               "Feixiao-1.0.8-Beta-16.zip" \
               "Feixiao-1.0.8-Beta-16.zip.sha256" \
-              --title "Feixiao 1.0.8 Beta 16" \
-              --notes "Development prerelease. Beta 16 promotes the successful RTL8821CE performance fix from Beta 15b: firmware auto rate adaptation is the default and TX STBC is forced off for RTL8821CE. Detailed diagnostics are retained but are disabled by default; use 'rtw88ctl diag on' to enable rtw88_diag_log output and sparse TX-status/TXRPT sampling, and 'rtw88ctl diag off' to disable both again without rebooting. The optional 'rate mcs5/mcs7' diagnostic modes remain available, while 'rate auto' is the boot default. WPA duplicate-M3 handling, AP disconnect cleanup, corrected RSSI EWMA, stable RA mask behavior and PHYINFO feedback are retained. Main remains stable." \
+              --title "Feixiao 1.0.8 RC1" \
+              --notes "Release Candidate for Feixiao 1.0.8. RC1 is based on the validated Beta 16 data path: RTL8821CE uses firmware automatic rate adaptation by default with TX STBC disabled, while the WPA duplicate-M3 fix, AP disconnect cleanup, corrected RSSI EWMA, stable RA-mask handling, PHYINFO feedback, SGI and A-MPDU support remain unchanged. Detailed diagnostics stay available through 'rtw88ctl diag on|off' but are disabled by default; TX-status sampling is reduced and capped so diagnostics cannot build an unbounded TXRPT queue. New in RC1: 'rtw88ctl version' reports both the control utility and loaded driver build, runtime diagnostics/rate state, CLI debug noise from network listing has been removed, and release metadata/documentation have been polished. This is a prerelease candidate for final 1.0.8; main remains stable." \
               --prerelease \
               --target "${{ github.sha }}" \
               --repo "${{ github.repository }}"
