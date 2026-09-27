@@ -12,16 +12,33 @@
 
 int rtw88_log_level = KERN_DEBUG;
 
-/* Beta 15b runtime TX-rate diagnostic mode.
+/* Beta 16 diagnostics are opt-in at runtime.  Keeping this off by default
+ * avoids hot-path log formatting and, in the C++ wrapper, suppresses sparse
+ * firmware TX-status requests so the TXRPT queue cannot grow during normal use. */
+int rtw88_beta16_diag_enabled = 0;
+
+int rtw88_beta16_set_diag_enabled(int enabled)
+{
+    rtw88_beta16_diag_enabled = enabled ? 1 : 0;
+    return 0;
+}
+
+int rtw88_beta16_diag_is_enabled(void)
+{
+    return rtw88_beta16_diag_enabled;
+}
+
+
+/* Beta 16 runtime TX-rate diagnostic mode.
  * 0 = firmware auto RA, 5 = force VHT 1SS MCS5, 7 = force VHT 1SS MCS7.
  * The patched upstream TX path reads this for unicast data frames only. */
-int rtw88_beta15b_force_rate_mode = 0;
+int rtw88_beta16_force_rate_mode = 0;
 
-int rtw88_beta15b_set_rate_mode(int mode)
+int rtw88_beta16_set_rate_mode(int mode)
 {
     if (mode != 0 && mode != 5 && mode != 7)
         return -EINVAL;
-    rtw88_beta15b_force_rate_mode = mode;
+    rtw88_beta16_force_rate_mode = mode;
     rtw88_diag_log("rtw88: RATE_TEST mode=%s\n",
                    mode == 0 ? "auto" : (mode == 5 ? "vht-mcs5" : "vht-mcs7"));
     return 0;
@@ -69,6 +86,8 @@ void rtw88_printk(int level, const char *fmt, ...)
 
 void rtw88_diag_log(const char *fmt, ...)
 {
+    if (!rtw88_beta16_diag_enabled) return;
+
     char buf[512];
     va_list ap;
     va_start(ap, fmt);
