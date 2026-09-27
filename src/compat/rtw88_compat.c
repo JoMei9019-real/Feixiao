@@ -824,29 +824,12 @@ void ieee80211_queue_delayed_work(struct ieee80211_hw *hw,
 
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
                                           const u8 *addr)
-{
-    if (!g_rtw88_sta || !g_rtw88_vif || !addr)
-        return NULL;
-    if (vif && vif != g_rtw88_vif)
-        return NULL;
-    if (!ether_addr_equal(g_rtw88_sta->addr, addr))
-        return NULL;
-    return g_rtw88_sta;
-}
+{ (void)vif; (void)addr; return NULL; }
 
 struct ieee80211_sta *ieee80211_find_sta_by_ifaddr(struct ieee80211_hw *hw,
                                                     const u8 *addr,
                                                     const u8 *localaddr)
-{
-    (void)hw;
-    if (!g_rtw88_sta || !g_rtw88_vif || !addr || !localaddr)
-        return NULL;
-    if (!ether_addr_equal(g_rtw88_sta->addr, addr))
-        return NULL;
-    if (!ether_addr_equal(g_rtw88_vif->addr, localaddr))
-        return NULL;
-    return g_rtw88_sta;
-}
+{ (void)hw; (void)addr; (void)localaddr; return NULL; }
 
 struct sk_buff *ieee80211_proberesp_get(struct ieee80211_hw *hw,
                                          struct ieee80211_vif *vif)
