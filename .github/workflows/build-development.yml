@@ -34,6 +34,10 @@ jobs:
         working-directory: Feixiao
         run: python3 scripts/apply_beta16_ra_fix.py
 
+      - name: Apply macOS sleep/wake PCI ring reinit
+        working-directory: Feixiao
+        run: python3 scripts/apply_sleep_pci_reinit.py
+
       - name: Download firmware blobs
         run: |
           cd Feixiao/firmware
