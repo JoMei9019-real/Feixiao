@@ -1,6 +1,9 @@
 name: Build Development
 
 on:
+  push:
+    branches:
+      - development
   workflow_dispatch:
 
 permissions:
@@ -26,6 +29,10 @@ jobs:
       - name: Apply shared TX/RA diagnostics
         working-directory: Feixiao
         run: python3 scripts/apply_beta7_tx_diag.py
+
+      - name: Apply Beta 11 safe RSSI fix
+        working-directory: Feixiao
+        run: python3 scripts/apply_beta11_rssi_fix.py
 
       - name: Download firmware blobs
         run: |
@@ -60,26 +67,26 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-10.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-10.zip > Feixiao-1.0.8-Beta-10.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-11.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-11.zip > Feixiao-1.0.8-Beta-11.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-10
+          name: Feixiao-1.0.8-Beta-11
           path: |
-            Feixiao-1.0.8-Beta-10.zip
-            Feixiao-1.0.8-Beta-10.zip.sha256
+            Feixiao-1.0.8-Beta-11.zip
+            Feixiao-1.0.8-Beta-11.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.10" \
-            "Feixiao-1.0.8-Beta-10.zip" \
-            "Feixiao-1.0.8-Beta-10.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 10" \
-            --notes "Development prerelease. Beta 10 targets the severe RX latency observed in Beta 9. Instead of flushing the macOS input queue once per packet, frames are queued during each NAPI poll and flushed immediately after that poll completes. This corrects the timing flaw in the older RX batching experiment, which flushed from the top-level interrupt handler before the asynchronous NAPI poll had necessarily delivered frames. Reorder-timer deliveries are explicitly flushed as a separate batch. RX batch counters are included in PERF diagnostics. Beta 9's safe NULL station lookups remain unchanged. Main remains stable." \
+          gh release create "v1.0.8-beta.11" \
+            "Feixiao-1.0.8-Beta-11.zip" \
+            "Feixiao-1.0.8-Beta-11.zip.sha256" \
+            --title "Feixiao 1.0.8 Beta 11" \
+            --notes "Development prerelease. Beta 11 restores the missing RSSI/firmware-rate-adaptation feedback without reintroducing Beta 8's unsafe mac80211 station lookup. The Linux RX path records pkt_stat RSSI into the registered peer under a short lifetime lock, while a serialized two-second state-machine timer updates rssi_level and sends RSSI information to firmware. ieee80211_find_sta() and ieee80211_find_sta_by_ifaddr() remain safe NULL stubs. Beta 11 also adds a guarded DMA fast path: original packet memory is mapped directly only when it is one physically contiguous segment entirely below 4GB; every other mapping falls back to the existing bounce-buffer path. Beta 10 NAPI-completion RX batching remains enabled. Main remains stable." \
             --prerelease \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}"
