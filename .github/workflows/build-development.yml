@@ -66,19 +66,20 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p Development
-          cp -R Feixiao/build/out/rtw88.kext Development/
-          cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-RC1.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-16.zip > Feixiao-1.0.8-Beta-16.zip.sha256
+          rm -rf Feixiao-1.0.8-RC1
+          mkdir -p Feixiao-1.0.8-RC1
+          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.0.8-RC1/
+          cp Feixiao/build/out/rtw88ctl Feixiao-1.0.8-RC1/
+          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.0.8-RC1 Feixiao-1.0.8-RC1.zip
+          shasum -a 256 Feixiao-1.0.8-RC1.zip > Feixiao-1.0.8-RC1.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-16
+          name: Feixiao-1.0.8-RC1
           path: |
-            Feixiao-1.0.8-Beta-16.zip
-            Feixiao-1.0.8-Beta-16.zip.sha256
+            Feixiao-1.0.8-RC1.zip
+            Feixiao-1.0.8-RC1.zip.sha256
 
       - name: Publish prerelease
         env:
@@ -87,8 +88,8 @@ jobs:
           TAG="v1.0.8-rc.1"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "Feixiao-1.0.8-Beta-16.zip" \
-              "Feixiao-1.0.8-Beta-16.zip.sha256" \
+              "Feixiao-1.0.8-RC1.zip" \
+              "Feixiao-1.0.8-RC1.zip.sha256" \
               --clobber \
               --repo "${{ github.repository }}"
             gh release edit "$TAG" \
@@ -99,8 +100,8 @@ jobs:
               --repo "${{ github.repository }}"
           else
             gh release create "$TAG" \
-              "Feixiao-1.0.8-Beta-16.zip" \
-              "Feixiao-1.0.8-Beta-16.zip.sha256" \
+              "Feixiao-1.0.8-RC1.zip" \
+              "Feixiao-1.0.8-RC1.zip.sha256" \
               --title "Feixiao 1.0.8 RC1" \
               --notes "Release Candidate for Feixiao 1.0.8. RC1 is based on the validated Beta 16 data path: RTL8821CE uses firmware automatic rate adaptation by default with TX STBC disabled, while the WPA duplicate-M3 fix, AP disconnect cleanup, corrected RSSI EWMA, stable RA-mask handling, PHYINFO feedback, SGI and A-MPDU support remain unchanged. Detailed diagnostics stay available through 'rtw88ctl diag on|off' but are disabled by default; TX-status sampling is reduced and capped so diagnostics cannot build an unbounded TXRPT queue. New in RC1: 'rtw88ctl version' reports both the control utility and loaded driver build, runtime diagnostics/rate state, CLI debug noise from network listing has been removed, and release metadata/documentation have been polished. This is a prerelease candidate for final 1.0.8; main remains stable." \
               --prerelease \
