@@ -447,10 +447,10 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
         _perfLastInterrupts  = irqNow;
 
         rtw88_diag_log(
-            "rtw88: PERF 5s tx_submit=%u rx_pkts=%u rx_bytes=%u irq=%u "
+            "rtw88: PERF t_ms=%lu 5s tx_submit=%u rx_pkts=%u rx_bytes=%u irq=%u "
             "rx_flush=%u rx_flush_pkts=%u dma_direct=%u dma_bounce=%u "
             "stalls=%u resumes=%u be_avail=%u stalled=%d\n",
-            dTx, dRx, dRxb, dIrq,
+            (unsigned long)jiffies, dTx, dRx, dRxb, dIrq,
             _perfRxFlushes, _perfRxFlushPackets,
             _perfDmaDirect, _perfDmaBounce,
             _perfTxStallEvents, _perfTxResumeEvents,
