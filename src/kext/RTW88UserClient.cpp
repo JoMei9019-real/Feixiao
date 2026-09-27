@@ -8,6 +8,8 @@
 #include <IOKit/IOLib.h>
 #include <string.h>
 
+extern "C" int rtw88_beta15b_set_rate_mode(int mode);
+
 #define super IOUserClient
 OSDefineMetaClassAndStructors(RTW88UserClient, IOUserClient)
 
