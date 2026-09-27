@@ -1049,75 +1049,58 @@ void rtw88_compat_exit(void)
 
 
 /*
- * Beta 11 safe station RSSI path.
+ * Beta 12 safe RSSI feed + diagnostics.
  *
- * Linux normally updates si->avg_rssi from rx.c after
- * ieee80211_find_sta_by_ifaddr().  Returning a raw station pointer from that
- * lookup caused the Beta 8 connection-time freeze, so keep the lookup stubs
- * returning NULL and update the single registered peer synchronously here.
- * The spinlock only protects the pointer lifetime and tiny EWMA update; no
- * firmware/MMIO operation is performed while it is held.
+ * Keep the generic mac80211 station lookup stubs disabled (Beta 8 froze the
+ * machine when a raw STA pointer was exposed there).  This narrow helper only
+ * touches the already-registered single associated peer while holding the
+ * pointer-lifetime spinlock for the tiny EWMA update.
  */
 void rtw88_record_sta_rssi(const uint8_t *peer_addr, uint8_t rssi)
 {
+    static u32 sample_count;
+    static u32 mismatch_count;
+
     if (!peer_addr || !g_rtw88_sta_lock)
         return;
 
     IOSimpleLockLock(g_rtw88_sta_lock);
     struct ieee80211_sta *sta = g_rtw88_sta;
+
     if (sta && ether_addr_equal(sta->addr, peer_addr)) {
         struct rtw_sta_info *si = (struct rtw_sta_info *)sta->drv_priv;
+        unsigned long before = ewma_rssi_read(&si->avg_rssi);
         ewma_rssi_add(&si->avg_rssi, rssi);
+        unsigned long after = ewma_rssi_read(&si->avg_rssi);
+        u32 n = ++sample_count;
+
+        if (n <= 8 || (n & 63) == 0)
+            rtw88_diag_log(
+                "rtw88: RSSI_DBG write n=%u sta=%p si=%p raw=%u before=%lu after=%lu\n",
+                n, sta, si, (unsigned)rssi, before, after);
+    } else {
+        u32 n = ++mismatch_count;
+        if (n <= 8 || (n & 63) == 0)
+            rtw88_diag_log(
+                "rtw88: RSSI_DBG miss n=%u reg_sta=%p peer=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                n, sta,
+                peer_addr[0], peer_addr[1], peer_addr[2],
+                peer_addr[3], peer_addr[4], peer_addr[5]);
     }
+
     IOSimpleLockUnlock(g_rtw88_sta_lock);
 }
 
-static uint8_t rtw88_beta11_rssi_level(uint8_t old_level, uint8_t rssi)
+bool rtw88_registered_sta_matches(struct ieee80211_sta *sta)
 {
-    uint8_t table[7] = {20, 34, 38, 42, 46, 50, 100};
-    uint8_t new_level = 0;
+    bool match = false;
+    if (!g_rtw88_sta_lock)
+        return false;
 
-    for (int i = 0; i < 7; i++)
-        if (i >= old_level)
-            table[i] += 3;
-
-    for (int i = 0; i < 7; i++) {
-        if (rssi < table[i]) {
-            new_level = (uint8_t)i;
-            break;
-        }
-    }
-    return new_level;
-}
-
-/*
- * Run from the kext state-machine workloop, where the caller owns a valid STA.
- * This intentionally mirrors only rtw_phy_stat_rssi_iter(): it updates the
- * firmware RSSI monitor without re-enabling the full watchdog / RF-dynamic
- * machinery that was disabled during the throughput investigation.
- */
-void rtw88_refresh_sta_rssi(struct rtw_dev *rtwdev, struct ieee80211_sta *sta)
-{
-    if (!rtwdev || !sta || !test_bit(RTW_FLAG_RUNNING, rtwdev->flags))
-        return;
-
-    struct rtw_sta_info *si = (struct rtw_sta_info *)sta->drv_priv;
-    uint8_t rssi = ewma_rssi_read(&si->avg_rssi);
-    if (!rssi)
-        return;
-
-    mutex_lock(&rtwdev->mutex);
-    uint8_t old_level = si->rssi_level;
-    si->rssi_level = rtw88_beta11_rssi_level(old_level, rssi);
-    rtwdev->dm_info.pre_min_rssi = rtwdev->dm_info.min_rssi;
-    rtwdev->dm_info.min_rssi = rssi;
-    rtw_fw_send_rssi_info(rtwdev, si);
-    mutex_unlock(&rtwdev->mutex);
-
-    rtw88_diag_log(
-        "rtw88: RSSIRA rssi=%u level=%u->%u macid=%u\n",
-        (unsigned)rssi, (unsigned)old_level,
-        (unsigned)si->rssi_level, (unsigned)si->mac_id);
+    IOSimpleLockLock(g_rtw88_sta_lock);
+    match = sta && g_rtw88_sta == sta;
+    IOSimpleLockUnlock(g_rtw88_sta_lock);
+    return match;
 }
 
 void rtw88_log_sta_ra_snapshot(struct ieee80211_sta *sta)
