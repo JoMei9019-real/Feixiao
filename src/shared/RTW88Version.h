@@ -2,9 +2,9 @@
 #pragma once
 
 #define RTW88_VERSION_STRING        "1.1.0"
-#define RTW88_BUILD_LABEL           "1.1.0 RC1"
-#define RTW88_BUILD_CHANNEL         "Release Candidate"
-#define RTW88_RELEASE_CANDIDATE     1
+#define RTW88_BUILD_LABEL           "1.1.0 Development"
+#define RTW88_BUILD_CHANNEL         "Development"
+#define RTW88_RELEASE_CANDIDATE     0
 
 struct RTW88VersionResult {
     char version[16];
