@@ -665,8 +665,17 @@ void ieee80211_iterate_stations_atomic(
     void (*iterator)(void *data, struct ieee80211_sta *sta),
     void *data)
 {
-    if (g_rtw88_sta && iterator)
-        iterator(data, g_rtw88_sta);
+    static u32 iter_count;
+    struct ieee80211_sta *sta = g_rtw88_sta;
+
+    if (sta && iterator) {
+        u32 n = ++iter_count;
+        if (n <= 8 || (n & 63) == 0)
+            rtw88_diag_log(
+                "rtw88: RSSI_DBG iterate n=%u sta=%p si=%p\n",
+                n, sta, sta->drv_priv);
+        iterator(data, sta);
+    }
 }
 
 void ieee80211_iter_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
