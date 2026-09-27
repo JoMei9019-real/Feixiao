@@ -228,6 +228,8 @@ void rtw88_register_vif(struct ieee80211_vif *vif);
 void rtw88_unregister_vif(void);
 void rtw88_register_sta(struct ieee80211_sta *sta);
 void rtw88_unregister_sta(void);
+void rtw88_record_sta_rssi(const uint8_t *peer_addr, uint8_t rssi);
+void rtw88_refresh_sta_rssi(struct rtw_dev *rtwdev, struct ieee80211_sta *sta);
 void rtw88_log_sta_ra_snapshot(struct ieee80211_sta *sta);
 
 #endif /* _RTW88_COMPAT_H */
