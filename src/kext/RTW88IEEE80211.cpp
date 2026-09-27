@@ -934,18 +934,23 @@ void RTW88IEEE80211::suspendForSleep()
     if (_manualScanTC) thread_call_cancel(_manualScanTC);
     if (_connectTC) thread_call_cancel(_connectTC);
 
-    clearKeys();
-    rxBaTeardownAll();
-    releaseSta();
-
-    if (_vif) {
-        _vif->bss_conf.assoc = false;
-        _vif->bss_conf.aid = 0;
+    /* If we were associated, perform the normal local disconnect while
+     * hardware/firmware are still running.  doDisconnect() sends a deauth,
+     * clears association state and releases the STA, but intentionally keeps
+     * _targetBSS and _password so wake can establish a brand-new connection. */
+    if (_resumeAfterWake) {
+        doDisconnect();
+        /* Give the management TX completion path a short window before the
+         * core is stopped.  Interrupts are still enabled at this point. */
+        IOSleep(30);
+    } else {
+        clearKeys();
+        rxBaTeardownAll();
+        releaseSta();
+        _txBaActive = false;
+        _scanReturnState = RTW88_STATE_IDLE;
+        _state = RTW88_STATE_IDLE;
     }
-
-    _txBaActive = false;
-    _scanReturnState = RTW88_STATE_IDLE;
-    _state = RTW88_STATE_IDLE;
 
     powerOff();
 }
