@@ -82,6 +82,7 @@ jobs:
             Feixiao-1.1.0-RC1.zip.sha256
 
       - name: Publish prerelease
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
