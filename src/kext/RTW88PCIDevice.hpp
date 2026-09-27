@@ -133,6 +133,7 @@ private:
                                    IOInterruptEventSource *src, int count);
 
     void debugTimerFired(IOTimerEventSource *src);
+    void wakeRecoveryFired(IOTimerEventSource *src);
 
     IOPCIDevice            *_pciDev       = nullptr;
     IOMemoryMap            *_mmioMap      = nullptr;
@@ -141,6 +142,7 @@ private:
     IOCommandGate          *_cmdGate      = nullptr;
     IOInterruptEventSource *_intrSrc      = nullptr;
     IOTimerEventSource     *_debugTimer   = nullptr;
+    IOTimerEventSource     *_wakeTimer    = nullptr;
     IOEthernetInterface    *_iface        = nullptr;
     IOGatedOutputQueue     *_txQueue      = nullptr;
     bool                    _rxQueued      = false;
@@ -155,6 +157,7 @@ private:
     bool                    _pmRegistered = false;
     bool                    _systemSleeping = false;
     bool                    _resumeNetworkEnabled = false;
+    bool                    _wakeRecoveryPending = false;
 
     /* TX flow control: set when outputPacket() stalls the gated queue because
      * the BE ring is nearly full; cleared when the IRQ completion path frees
