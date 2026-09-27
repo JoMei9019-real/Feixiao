@@ -416,7 +416,9 @@ void rtw88_unregister_sta(void) {
  * freed TX descriptors.  Runs on the thread_call thread with no rtw88 locks
  * held, so it can safely (async-)service a stalled output queue. */
 static void (*g_tx_resume_cb)(void) = NULL;
+static void (*g_rx_flush_cb)(void) = NULL;
 void rtw88_set_tx_resume_cb(void (*cb)(void)) { g_tx_resume_cb = cb; }
+void rtw88_set_rx_flush_cb(void (*cb)(void)) { g_rx_flush_cb = cb; }
 
 static void rtw88_irq_thread_wrapper(thread_call_param_t param0, thread_call_param_t param1)
 {
@@ -478,6 +480,14 @@ static void rtw88_napi_thread_wrapper(thread_call_param_t param0, thread_call_pa
     struct napi_struct *napi = (struct napi_struct *)param0;
     if (napi && napi->poll) {
         int work = napi->poll(napi, napi->weight);
+
+        /* The PCI RX path queues Ethernet frames into IONetworkInterface.
+         * Flush only after the NAPI poll has actually delivered the batch.
+         * Flushing from the top-level interrupt handler is too early because
+         * this poll runs asynchronously on a thread_call. */
+        if (g_rx_flush_cb)
+            g_rx_flush_cb();
+
         if (work >= napi->weight) {
             if (napi->thread_call) {
                 thread_call_enter((thread_call_t)napi->thread_call);
