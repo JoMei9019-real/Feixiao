@@ -122,6 +122,7 @@ private:
     bool     attachDevice();
     bool     setupInterrupt();
     bool     setupDMA();
+    bool     refreshBAR2Mapping();
     void     teardown();
     const char *chipDisplayName() const;
     void     publishHardwareIdentity();
@@ -158,6 +159,7 @@ private:
     bool                    _systemSleeping = false;
     bool                    _resumeNetworkEnabled = false;
     bool                    _wakeRecoveryPending = false;
+    UInt32                  _wakeRecoveryAttempts = 0;
 
     /* TX flow control: set when outputPacket() stalls the gated queue because
      * the BE ring is nearly full; cleared when the IRQ completion path frees
