@@ -964,6 +964,15 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
 
     IOLog("rtw88: IEEE80211 wake hard-on\n");
 
+    /* System sleep can invalidate the PCIe DMA/ring state even though the
+     * software rtw_dev survives.  Recreate all TX/RX rings and mappings before
+     * rtw_core_start() programs them back into the chip. */
+    int pciRet = rtw88_macos_pci_reinit(_rtwdev);
+    if (pciRet) {
+        IOLog("rtw88: wake PCI ring reinit failed: %d\n", pciRet);
+        return kIOReturnError;
+    }
+
     IOReturn ret = powerOn();
     if (ret != kIOReturnSuccess)
         return ret;
