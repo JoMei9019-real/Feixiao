@@ -19,13 +19,13 @@ int rtw88_beta16_diag_enabled = 0;
 
 int rtw88_beta16_set_diag_enabled(int enabled)
 {
-    rtw88_beta16_diag_enabled = enabled ? 1 : 0;
+    __atomic_store_n(&rtw88_beta16_diag_enabled, enabled ? 1 : 0, __ATOMIC_RELEASE);
     return 0;
 }
 
 int rtw88_beta16_diag_is_enabled(void)
 {
-    return rtw88_beta16_diag_enabled;
+    return __atomic_load_n(&rtw88_beta16_diag_enabled, __ATOMIC_ACQUIRE);
 }
 
 
@@ -86,7 +86,7 @@ void rtw88_printk(int level, const char *fmt, ...)
 
 void rtw88_diag_log(const char *fmt, ...)
 {
-    if (!rtw88_beta16_diag_enabled) return;
+    if (!rtw88_beta16_diag_is_enabled()) return;
 
     char buf[512];
     va_list ap;
