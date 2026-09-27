@@ -10,6 +10,7 @@
 #include <mach/mach.h>
 #include <IOKit/IOKitLib.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include "../src/shared/RTW88Version.h"
 
 /* ------------------------------------------------------------------ */
 /*  Selector numbers — must match RTW88UserClient.hpp                  */
@@ -27,6 +28,7 @@ enum {
     kRTW88PowerOff    = 9,
     kRTW88SetRateMode = 10,
     kRTW88SetDiag     = 11,
+    kRTW88GetVersion  = 12,
 };
 
 struct RTW88ConnectArgs {
@@ -154,11 +156,6 @@ static int cmd_list(io_connect_t conn)
                 mach_error_string(kr));
         return 1;
     }
-
-    /* Debug: show raw returned length and first 32 bytes */
-    fprintf(stderr, "[dbg] IOKit returned len=%zu, first bytes:", len);
-    for (size_t i = 0; i < 32 && i < len; i++) fprintf(stderr, " %02x", buf[i]);
-    fprintf(stderr, "\n");
 
     printf("%-33s %-18s %5s %7s %s\n",
            "SSID", "BSSID", "RSSI", "Channel", "Security");
@@ -377,6 +374,35 @@ static int cmd_power(io_connect_t conn, int on)
     return 0;
 }
 
+static int cmd_version(io_connect_t conn)
+{
+    printf("rtw88ctl:    %s RC%u\n",
+           RTW88_VERSION_STRING, RTW88_RELEASE_CANDIDATE);
+
+    if (conn == MACH_PORT_NULL) {
+        printf("Driver:      not loaded\n");
+        return 0;
+    }
+
+    struct RTW88VersionResult result = {};
+    size_t sz = sizeof(result);
+    kern_return_t kr = IOConnectCallStructMethod(conn, kRTW88GetVersion,
+                                                  NULL, 0, &result, &sz);
+    if (kr != KERN_SUCCESS) {
+        printf("Driver:      older/incompatible build (version query unavailable)\n");
+        return 0;
+    }
+
+    printf("Driver:      %s\n", result.build_label);
+    printf("Channel:     %s\n", result.build_channel);
+    printf("Diagnostics: %s\n", result.diagnostics_enabled ? "on" : "off");
+    printf("TX rate:     %s\n",
+           result.rate_mode == 0 ? "auto" :
+           (result.rate_mode == 5 ? "VHT MCS5 (forced)" :
+           (result.rate_mode == 7 ? "VHT MCS7 (forced)" : "unknown")));
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Usage                                                               */
 /* ------------------------------------------------------------------ */
@@ -393,10 +419,11 @@ static void usage(const char *argv0)
         "  disconnect               Disconnect\n"
         "  power on|off             Toggle IEEE80211 radio power\n"
         "  status                   Show current connection status\n"
+        "  version                  Show rtw88ctl and loaded driver version\n"
         "  log                      Dump driver log buffer\n"
         "  debug <level>            Set debug level (0=err 1=warn 2=info 3=dbg)\n"
         "  rate auto|mcs5|mcs7      Switch TX data rate test mode at runtime\n"
-        "  diag on|off               Enable/disable detailed runtime diagnostics\n"
+        "  diag on|off              Enable/disable detailed runtime diagnostics\n"
         "\n"
         "Examples:\n"
         "  %s scan -w 10            Scan for 10 seconds\n"
@@ -422,11 +449,20 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    const char *cmd = argv[1];
+
+    if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {
+        io_connect_t version_conn = open_kext();
+        int ret = cmd_version(version_conn);
+        if (version_conn != MACH_PORT_NULL)
+            IOServiceClose(version_conn);
+        return ret;
+    }
+
     io_connect_t conn = open_kext();
     if (conn == MACH_PORT_NULL) return 1;
 
     int ret = 0;
-    const char *cmd = argv[1];
 
     if (strcmp(cmd, "scan") == 0) {
         int wait = 10;
