@@ -82,11 +82,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.14" \
-            "Feixiao-1.0.8-Beta-14.zip" \
-            "Feixiao-1.0.8-Beta-14.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 14" \
-            --notes "Development prerelease. Beta 14 fixes the macOS compat EWMA implementation to match Linux semantics. rtw88 declares RSSI as DECLARE_EWMA(rssi, 10, 16), where 16 is the reciprocal weight (1/16), not a literal shift count. The previous compat implementation treated it as a shift, producing undefined behavior and enormous avg_rssi values, which then poisoned rssi_level and firmware RA. Beta 14 keeps the Beta 13 scan-aware, non-blocking RSSI/RA refresh, pointer/EWMA diagnostics, timestamped PERF/RSSIRA logs, Beta 11 DMA fast-path, and Beta 10 NAPI RX batching. Generic ieee80211_find_sta* remains disabled to avoid the Beta 8 freeze. Main remains stable." \
-            --prerelease \
-            --target "${{ github.sha }}" \
-            --repo "${{ github.repository }}"
+          TAG="v1.0.8-beta.14"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "Feixiao-1.0.8-Beta-14.zip" \
+              "Feixiao-1.0.8-Beta-14.zip.sha256" \
+              --clobber \
+              --repo "${{ github.repository }}"
+            gh release edit "$TAG" \
+              --title "Feixiao 1.0.8 Beta 14" \
+              --notes "Development prerelease. Beta 14 fixes the macOS compat EWMA implementation to match Linux semantics. rtw88 declares RSSI as DECLARE_EWMA(rssi, 10, 16), where 16 is the reciprocal weight (1/16), not a literal shift count. The previous compat implementation treated it as a shift, producing undefined behavior and enormous avg_rssi values, which then poisoned rssi_level and firmware RA. Beta 14 keeps the Beta 13 scan-aware, non-blocking RSSI/RA refresh, pointer/EWMA diagnostics, timestamped PERF/RSSIRA logs, Beta 11 DMA fast-path, and Beta 10 NAPI RX batching. Generic ieee80211_find_sta* remains disabled to avoid the Beta 8 freeze. Main remains stable." \
+              --prerelease \
+              --target "${{ github.sha }}" \
+              --repo "${{ github.repository }}"
+          else
+            gh release create "$TAG" \
+              "Feixiao-1.0.8-Beta-14.zip" \
+              "Feixiao-1.0.8-Beta-14.zip.sha256" \
+              --title "Feixiao 1.0.8 Beta 14" \
+              --notes "Development prerelease. Beta 14 fixes the macOS compat EWMA implementation to match Linux semantics. rtw88 declares RSSI as DECLARE_EWMA(rssi, 10, 16), where 16 is the reciprocal weight (1/16), not a literal shift count. The previous compat implementation treated it as a shift, producing undefined behavior and enormous avg_rssi values, which then poisoned rssi_level and firmware RA. Beta 14 keeps the Beta 13 scan-aware, non-blocking RSSI/RA refresh, pointer/EWMA diagnostics, timestamped PERF/RSSIRA logs, Beta 11 DMA fast-path, and Beta 10 NAPI RX batching. Generic ieee80211_find_sta* remains disabled to avoid the Beta 8 freeze. Main remains stable." \
+              --prerelease \
+              --target "${{ github.sha }}" \
+              --repo "${{ github.repository }}"
+          fi
