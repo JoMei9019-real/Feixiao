@@ -911,6 +911,76 @@ void RTW88IEEE80211::powerOff()
     _powered = false;
 }
 
+void RTW88IEEE80211::suspendForSleep()
+{
+    if (_suspended)
+        return;
+
+    _resumeAfterWake =
+        (_state == RTW88_STATE_CONNECTED) ||
+        (_state == RTW88_STATE_SCANNING &&
+         _scanReturnState == RTW88_STATE_CONNECTED);
+    _suspended = true;
+
+    IOLog("rtw88: IEEE80211 suspend (reconnect=%d)\n",
+          _resumeAfterWake ? 1 : 0);
+
+    if (_timer) _timer->cancelTimeout();
+    if (_rssiTimer) _rssiTimer->cancelTimeout();
+    if (_addbaRetryTimer) _addbaRetryTimer->cancelTimeout();
+    if (_reorderTimer) _reorderTimer->cancelTimeout();
+
+    _manualScanAbort = true;
+    if (_manualScanTC) thread_call_cancel(_manualScanTC);
+    if (_connectTC) thread_call_cancel(_connectTC);
+
+    clearKeys();
+    rxBaTeardownAll();
+    releaseSta();
+
+    if (_vif) {
+        _vif->bss_conf.assoc = false;
+        _vif->bss_conf.aid = 0;
+    }
+
+    _txBaActive = false;
+    _scanReturnState = RTW88_STATE_IDLE;
+    _state = RTW88_STATE_IDLE;
+
+    powerOff();
+}
+
+IOReturn RTW88IEEE80211::resumeFromSleep()
+{
+    if (!_suspended)
+        return kIOReturnSuccess;
+
+    IOLog("rtw88: IEEE80211 resume\n");
+
+    IOReturn ret = powerOn();
+    if (ret != kIOReturnSuccess)
+        return ret;
+
+    _suspended = false;
+    _manualScanAbort = false;
+
+    if (_rssiTimer)
+        _rssiTimer->setTimeoutMS(2000);
+
+    bool reconnect = _resumeAfterWake && _targetBSS.ssid[0] != '\0';
+    _resumeAfterWake = false;
+
+    if (reconnect) {
+        IOLog("rtw88: scheduling reconnect after wake to '%s'\n",
+              _targetBSS.ssid);
+        _state = RTW88_STATE_AUTHENTICATING;
+        if (_connectTC)
+            thread_call_enter(_connectTC);
+    }
+
+    return kIOReturnSuccess;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Interrupt dispatch                                                  */
 /* ------------------------------------------------------------------ */
@@ -3679,12 +3749,15 @@ void RTW88IEEE80211::rssiTimerFired(OSObject *owner, IOTimerEventSource *timer)
     if (!self)
         return;
 
+    if (self->_suspended || !self->_powered)
+        return;
+
     self->refreshRateControlRssi();
 
     /* Keep this deliberately slow: Linux refreshes this as part of its
      * watchdog, not per packet.  Two seconds is enough to keep firmware RA
      * informed without creating an H2C flood. */
-    if (self->_rssiTimer)
+    if (self->_rssiTimer && !self->_suspended && self->_powered)
         self->_rssiTimer->setTimeoutMS(2000);
 }
 
