@@ -1,9 +1,6 @@
 name: Build Development
 
 on:
-  push:
-    branches:
-      - development
   workflow_dispatch:
 
 permissions:
