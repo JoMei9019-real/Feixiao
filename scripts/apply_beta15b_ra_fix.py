@@ -204,7 +204,7 @@ rate_anchor = """\tfix_rate = dm_info->fix_rate;
 rate_replacement = rate_anchor + """
 \t/*
 \t * Feixiao Beta 15b diagnostic: bypass firmware RA for data frames when
-\t * requested from rtw88ctl.  Management/EAPOL rate handling is untouched.
+\t * requested from rtw88ctl.  Management and EAPOL rate handling are untouched.
 \t * Auto mode (0) preserves normal firmware rate adaptation.
 \t */
 \textern int rtw88_beta15b_force_rate_mode;
