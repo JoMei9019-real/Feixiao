@@ -81,6 +81,8 @@ public:
 
     /* Called from RTW88IEEE80211 to deliver RX frames to macOS */
     void injectRxFrame(mbuf_t m);
+    /* Submit RX frames accumulated during one NAPI poll. */
+    void flushRxQueue();
     /* The workloop the RX/interrupt path runs on. RTW88IEEE80211 attaches its
      * RX reorder flush timer here so all frame delivery is serialized on one
      * thread (injectRxFrame's queue+flush is not safe against concurrent
@@ -138,6 +140,8 @@ private:
     IOTimerEventSource     *_debugTimer   = nullptr;
     IOEthernetInterface    *_iface        = nullptr;
     IOGatedOutputQueue     *_txQueue      = nullptr;
+    bool                    _rxQueued      = false;
+    UInt32                  _rxQueuedCount = 0;
 
     RTW88IEEE80211         *_ieee80211    = nullptr;
     RTW88UserClient        *_userClient   = nullptr;
@@ -159,6 +163,8 @@ private:
     volatile UInt32         _perfTxResumeEvents= 0;
     volatile UInt32         _perfRxPackets     = 0;
     volatile UInt32         _perfRxBytes       = 0;
+    volatile UInt32         _perfRxFlushes     = 0;
+    volatile UInt32         _perfRxFlushPackets= 0;
     volatile UInt32         _perfInterrupts    = 0;
     UInt32                  _perfLastTxSubmitted = 0;
     UInt32                  _perfLastRxPackets   = 0;
