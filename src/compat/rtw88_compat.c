@@ -408,6 +408,22 @@ void rtw88_unregister_sta(void) {
     rtw88_diag_log("rtw88: COMPAT STA unregistered\n");
 }
 
+void rtw88_log_sta_ra_snapshot(struct ieee80211_sta *sta)
+{
+    if (!sta) {
+        rtw88_diag_log("rtw88: LINKDIAG RA snapshot unavailable: no STA\n");
+        return;
+    }
+    struct rtw_sta_info *si = (struct rtw_sta_info *)sta->drv_priv;
+    rtw88_diag_log(
+        "rtw88: LINKDIAG RA rate_id=%u si_bw=%u si_sgi=%u si_vht=%u "
+        "ra_desc=0x%02x ra_mbps=%u ra_mask=0x%llx rssi_lvl=%u\n",
+        (unsigned)si->rate_id, (unsigned)si->bw_mode,
+        (unsigned)si->sgi_enable, (unsigned)si->vht_enable,
+        (unsigned)si->ra_report.desc_rate, (unsigned)si->ra_report.bit_rate,
+        (unsigned long long)si->ra_mask, (unsigned)si->rssi_level);
+}
+
 /* Kext-registered hook fired after the IRQ bottom-half (tx_isr) has run and
  * freed TX descriptors.  Runs on the thread_call thread with no rtw88 locks
  * held, so it can safely (async-)service a stalled output queue. */

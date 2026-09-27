@@ -227,5 +227,6 @@ void rtw88_register_vif(struct ieee80211_vif *vif);
 void rtw88_unregister_vif(void);
 void rtw88_register_sta(struct ieee80211_sta *sta);
 void rtw88_unregister_sta(void);
+void rtw88_log_sta_ra_snapshot(struct ieee80211_sta *sta);
 
 #endif /* _RTW88_COMPAT_H */

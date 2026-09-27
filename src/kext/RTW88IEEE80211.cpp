@@ -2469,12 +2469,9 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
             int staRet = _hw->ops->sta_add(_hw, _vif, _sta);
             if (staRet == 0) {
                 rtw88_register_sta(_sta);
-                struct rtw_sta_info *si =
-                    (struct rtw_sta_info *)_sta->drv_priv;
                 rtw88_diag_log(
                     "rtw88: LINKDIAG assoc chan=%u width=%u sta_bw=%u ht=%u vht=%u "
-                    "ht_cap=0x%04x vht_cap=0x%08x ht_factor=%u ht_density=%u "
-                    "rate_id=%u si_bw=%u si_sgi=%u si_vht=%u ra_mask=0x%llx\n",
+                    "ht_cap=0x%04x vht_cap=0x%08x ht_factor=%u ht_density=%u\n",
                     (unsigned)_targetBSS.channel, (unsigned)_connChanWidth,
                     (unsigned)_sta->deflink.bandwidth,
                     (unsigned)_sta->deflink.ht_cap.ht_supported,
@@ -2482,10 +2479,8 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                     (unsigned)_sta->deflink.ht_cap.cap,
                     (unsigned)_sta->deflink.vht_cap.cap,
                     (unsigned)_sta->deflink.ht_cap.ampdu_factor,
-                    (unsigned)_sta->deflink.ht_cap.ampdu_density,
-                    (unsigned)si->rate_id, (unsigned)si->bw_mode,
-                    (unsigned)si->sgi_enable, (unsigned)si->vht_enable,
-                    (unsigned long long)si->ra_mask);
+                    (unsigned)_sta->deflink.ht_cap.ampdu_density);
+                rtw88_log_sta_ra_snapshot(_sta);
             } else {
                 rtw88_diag_log("rtw88: sta_add failed ret=%d\n", staRet);
             }
