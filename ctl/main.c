@@ -25,6 +25,7 @@ enum {
     kRTW88GetLog      = 7,
     kRTW88PowerOn     = 8,
     kRTW88PowerOff    = 9,
+    kRTW88SetRateMode = 10,
 };
 
 struct RTW88ConnectArgs {
@@ -318,6 +319,28 @@ static int cmd_debug(io_connect_t conn, int level)
     return 0;
 }
 
+static int cmd_rate(io_connect_t conn, const char *mode)
+{
+    uint64_t in;
+    if (strcmp(mode, "auto") == 0) in = 0;
+    else if (strcmp(mode, "mcs5") == 0) in = 5;
+    else if (strcmp(mode, "mcs7") == 0) in = 7;
+    else {
+        fprintf(stderr, "rtw88ctl: rate requires auto, mcs5, or mcs7\n");
+        return 1;
+    }
+
+    kern_return_t kr = IOConnectCallScalarMethod(conn, kRTW88SetRateMode,
+                                                  &in, 1, NULL, NULL);
+    if (kr != KERN_SUCCESS) {
+        fprintf(stderr, "rtw88ctl: set rate mode failed: %s\n",
+                mach_error_string(kr));
+        return 1;
+    }
+    printf("TX rate mode set to %s\n", mode);
+    return 0;
+}
+
 static int cmd_power(io_connect_t conn, int on)
 {
     kern_return_t kr = IOConnectCallStructMethod(conn,
@@ -350,6 +373,7 @@ static void usage(const char *argv0)
         "  status                   Show current connection status\n"
         "  log                      Dump driver log buffer\n"
         "  debug <level>            Set debug level (0=err 1=warn 2=info 3=dbg)\n"
+        "  rate auto|mcs5|mcs7      Switch TX data rate test mode at runtime\n"
         "\n"
         "Examples:\n"
         "  %s scan -w 10            Scan for 10 seconds\n"
@@ -420,6 +444,10 @@ int main(int argc, char *argv[])
     } else if (strcmp(cmd, "debug") == 0) {
         if (argc < 3) { fprintf(stderr, "debug requires level\n"); ret = 1; }
         else ret = cmd_debug(conn, atoi(argv[2]));
+
+    } else if (strcmp(cmd, "rate") == 0) {
+        if (argc < 3) { fprintf(stderr, "rate requires auto, mcs5, or mcs7\n"); ret = 1; }
+        else ret = cmd_rate(conn, argv[2]);
 
     } else {
         fprintf(stderr, "rtw88ctl: unknown command '%s'\n", cmd);
