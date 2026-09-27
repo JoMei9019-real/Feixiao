@@ -45,10 +45,24 @@ replacement = anchor + r"""
  */
 int rtw88_macos_pci_reinit(struct rtw_dev *rtwdev)
 {
+	struct rtw_pci *rtwpci;
 	int ret;
 
 	if (!rtwdev)
 		return -EINVAL;
+
+	rtwpci = (struct rtw_pci *)rtwdev->priv;
+
+	/*
+	 * pci.c cached the pre-sleep BAR VA in rtwpci->mmap at probe time.
+	 * RTW88PCIDevice remaps BAR2 first; refresh the driver's cached pointer
+	 * before any post-wake MMIO access.
+	 */
+	rtwpci->mmap = pci_ioremap_bar(rtwpci->pdev, 2);
+	if (!rtwpci->mmap) {
+		rtw_err(rtwdev, "macOS wake BAR2 remap unavailable\n");
+		return -ENODEV;
+	}
 
 	rtw_pci_deinit(rtwdev);
 	ret = rtw_pci_init(rtwdev);
