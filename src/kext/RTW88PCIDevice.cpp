@@ -795,15 +795,20 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
 
         if (_debugTimer)
             _debugTimer->cancelTimeout();
+
+        /* Tear down the Wi-Fi association while firmware, TX and IRQ handling
+         * are still fully alive.  This mirrors a deliberate Wi-Fi off/on
+         * cycle and prevents carrying a stale CONNECTED/STA state across
+         * system sleep. */
+        if (_ieee80211)
+            _ieee80211->suspendForSleep();
+
         if (_txQueue) {
             _txQueue->stop();
             _txQueue->flush();
         }
         if (_intrSrc)
             _intrSrc->disable();
-
-        if (_ieee80211)
-            _ieee80211->suspendForSleep();
 
         _txStalled = false;
         setLinkStatus(kIONetworkLinkValid);
