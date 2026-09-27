@@ -44,14 +44,20 @@ if needle not in tx:
     raise SystemExit("tx.c purge diagnostic insertion point not found")
 tx = tx.replace(needle, repl, 1)
 
-needle = r"""	skb_queue_tail(&tx_report->queue, skb);
+needle = r"""	spin_lock_irqsave(&tx_report->q_lock, flags);
+	__skb_queue_tail(&tx_report->queue, skb);
+	spin_unlock_irqrestore(&tx_report->q_lock, flags);
 
 	mod_timer(&tx_report->purge_timer, jiffies + RTW_TX_PROBE_TIMEOUT);"""
-repl = r"""	skb_queue_tail(&tx_report->queue, skb);
+repl = r"""	spin_lock_irqsave(&tx_report->q_lock, flags);
+	__skb_queue_tail(&tx_report->queue, skb);
 	beta7_txr_enqueued++;
+	u32 beta7_pending = skb_queue_len(&tx_report->queue);
+	spin_unlock_irqrestore(&tx_report->q_lock, flags);
+
 	rtw88_diag_log(
 		"rtw88: TXRPT enqueue total=%u pending=%u sn=0x%02x\n",
-		beta7_txr_enqueued, skb_queue_len(&tx_report->queue), sn);
+		beta7_txr_enqueued, beta7_pending, sn);
 
 	mod_timer(&tx_report->purge_timer, jiffies + RTW_TX_PROBE_TIMEOUT);"""
 if needle not in tx:
