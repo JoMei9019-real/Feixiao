@@ -12,6 +12,21 @@
 
 int rtw88_log_level = KERN_DEBUG;
 
+/* Beta 15b runtime TX-rate diagnostic mode.
+ * 0 = firmware auto RA, 5 = force VHT 1SS MCS5, 7 = force VHT 1SS MCS7.
+ * The patched upstream TX path reads this for unicast data frames only. */
+int rtw88_beta15b_force_rate_mode = 0;
+
+int rtw88_beta15b_set_rate_mode(int mode)
+{
+    if (mode != 0 && mode != 5 && mode != 7)
+        return -EINVAL;
+    rtw88_beta15b_force_rate_mode = mode;
+    rtw88_diag_log("rtw88: RATE_TEST mode=%s\n",
+                   mode == 0 ? "auto" : (mode == 5 ? "vht-mcs5" : "vht-mcs7"));
+    return 0;
+}
+
 struct task_struct *__rtw88_current_task = NULL;
 
 static IOSimpleLock *rtw88_log_lock = NULL;
