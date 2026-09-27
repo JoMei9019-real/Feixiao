@@ -137,6 +137,14 @@ static dma_addr_t compat_dma_map(struct device *dev, void *ptr,
     if (!g_pci_dev_instance || !ptr) return 0;
 
     IOPhysicalAddress phys = 0;
+
+    /* Beta 11 fast path: map the original buffer directly only when the
+     * complete mapping is one physical segment and remains below 4GB.  The
+     * RTL88xx PCI descriptors carry 32-bit DMA addresses, so any mapping that
+     * cannot prove both properties falls back to the existing bounce path. */
+    if (g_pci_dev_instance->mapDirectIfContiguous(ptr, size, dir, &phys))
+        return (dma_addr_t)phys;
+
     void *bounce = g_pci_dev_instance->allocCoherent(size, &phys);
     if (!bounce) return 0;
 
@@ -440,9 +448,11 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 
         rtw88_diag_log(
             "rtw88: PERF 5s tx_submit=%u rx_pkts=%u rx_bytes=%u irq=%u "
-            "rx_flush=%u rx_flush_pkts=%u stalls=%u resumes=%u be_avail=%u stalled=%d\n",
+            "rx_flush=%u rx_flush_pkts=%u dma_direct=%u dma_bounce=%u "
+            "stalls=%u resumes=%u be_avail=%u stalled=%d\n",
             dTx, dRx, dRxb, dIrq,
             _perfRxFlushes, _perfRxFlushPackets,
+            _perfDmaDirect, _perfDmaBounce,
             _perfTxStallEvents, _perfTxResumeEvents,
             avail, _txStalled ? 1 : 0);
 
@@ -822,6 +832,73 @@ void RTW88PCIDevice::flushRxQueue()
 /*  DMA coherent allocation                                             */
 /* ------------------------------------------------------------------ */
 
+
+bool RTW88PCIDevice::mapDirectIfContiguous(void *ptr, size_t size, int dir,
+                                            IOPhysicalAddress *phys)
+{
+    if (!ptr || !size || !phys)
+        return false;
+
+    IOOptionBits direction = kIODirectionInOut;
+    if (dir == 0)          /* DMA_FROM_DEVICE */
+        direction = kIODirectionIn;
+    else if (dir == 1)     /* DMA_TO_DEVICE */
+        direction = kIODirectionOut;
+
+    IOMemoryDescriptor *desc = IOMemoryDescriptor::withAddressRange(
+        (mach_vm_address_t)(uintptr_t)ptr,
+        (mach_vm_size_t)size,
+        direction,
+        kernel_task);
+    if (!desc) {
+        _perfDmaBounce++;
+        return false;
+    }
+
+    IOReturn prep = desc->prepare(direction);
+    if (prep != kIOReturnSuccess) {
+        desc->release();
+        _perfDmaBounce++;
+        return false;
+    }
+
+    IOByteCount segLen = 0;
+    IOPhysicalAddress pa = desc->getPhysicalSegment(0, &segLen);
+    bool usable = pa != 0 && segLen >= size &&
+                  ((uint64_t)pa + (uint64_t)size - 1ULL) <= 0xffffffffULL;
+
+    if (!usable) {
+        desc->complete(direction);
+        desc->release();
+        _perfDmaBounce++;
+        return false;
+    }
+
+    DMAEntry *entry = (DMAEntry *)IOMallocZero(sizeof(DMAEntry));
+    if (!entry) {
+        desc->complete(direction);
+        desc->release();
+        _perfDmaBounce++;
+        return false;
+    }
+
+    entry->desc       = desc;
+    entry->virt       = ptr;
+    entry->phys       = pa;
+    entry->size       = size;
+    entry->orig_va    = nullptr;
+    entry->direct_map = true;
+
+    IOSimpleLockLock(_dmaLock);
+    entry->next = _dmaList;
+    _dmaList = entry;
+    IOSimpleLockUnlock(_dmaLock);
+
+    *phys = pa;
+    _perfDmaDirect++;
+    return true;
+}
+
 void *RTW88PCIDevice::allocCoherent(size_t size, IOPhysicalAddress *phys)
 {
     /*
@@ -859,6 +936,7 @@ void *RTW88PCIDevice::allocCoherent(size_t size, IOPhysicalAddress *phys)
     entry->virt = va;
     entry->phys = pa;
     entry->size = size;
+    entry->direct_map = false;
 
     IOSimpleLockLock(_dmaLock);
     entry->next = _dmaList;
@@ -957,7 +1035,7 @@ void RTW88PCIDevice::syncBounceForCpu(IOPhysicalAddress dma, size_t size)
      */
     IOSimpleLockLock(_dmaLock);
     for (DMAEntry *e = _dmaList; e; e = e->next) {
-        if (e->phys == dma && e->orig_va && e->virt) {
+        if (e->phys == dma && !e->direct_map && e->orig_va && e->virt) {
             size_t copy_len = (size <= e->size) ? size : e->size;
             IOSimpleLockUnlock(_dmaLock);
             memcpy(e->orig_va, e->virt, copy_len);
