@@ -6,6 +6,7 @@
 #pragma once
 
 #include <IOKit/IOUserClient.h>
+#include "../shared/RTW88Version.h"
 
 class RTW88PCIDevice;
 
@@ -25,6 +26,7 @@ enum RTW88UserClientSelector {
     kRTW88PowerOff    = 9,
     kRTW88SetRateMode = 10,
     kRTW88SetDiag     = 11,
+    kRTW88GetVersion  = 12,
     kRTW88NumSelectors
 };
 
@@ -96,6 +98,8 @@ private:
                                  IOExternalMethodArguments *args);
     static IOReturn sSetDiag(RTW88UserClient *target, void *ref,
                              IOExternalMethodArguments *args);
+    static IOReturn sGetVersion(RTW88UserClient *target, void *ref,
+                                IOExternalMethodArguments *args);
 
     static const IOExternalMethodDispatch sMethods[kRTW88NumSelectors];
 
