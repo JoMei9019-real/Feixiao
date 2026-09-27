@@ -90,6 +90,7 @@ public:
     void      powerOff();    /* disable: rtw_core_stop */
     void      suspendForSleep();
     IOReturn  resumeFromSleep();
+    void      reconnectAfterWake();
     void      handleInterrupt();
     UInt32    outputPacket(mbuf_t m);
     void      getMACAddress(uint8_t *mac);
