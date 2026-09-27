@@ -54,7 +54,17 @@ make all
 
 The compiled kernel extension (`rtw88.kext`) and the command-line utility (`rtw88ctl`) will be generated in the `build/out/` directory.
 
+## Release Candidate
+
+The current 1.0.8 release candidate defaults to firmware automatic rate
+adaptation. Detailed diagnostics are disabled during normal operation and can
+be enabled temporarily with `rtw88ctl diag on`.
+
+Use `rtw88ctl version` to verify that the control utility and loaded driver
+belong to the same build.
+
 ## Installation & Usage
+
 
 1. **Load the Kext:**
    To load it manually for testing:
@@ -64,9 +74,11 @@ The compiled kernel extension (`rtw88.kext`) and the command-line utility (`rtw8
    ```
    *(You may be prompted to approve the extension in System Settings -> Privacy & Security. If you are using a Hackintosh, you can inject it via OpenCore).*
 
-2. **Check Status:**
-   Use the built-in control utility to check if the driver successfully initialized your card:
+2. **Check Version and Status:**
+   Verify that the control utility matches the loaded driver, then check the
+   current connection state:
    ```sh
+   ./build/out/rtw88ctl version
    ./build/out/rtw88ctl status
    ```
 
@@ -84,7 +96,25 @@ The compiled kernel extension (`rtw88.kext`) and the command-line utility (`rtw8
    ./build/out/rtw88ctl connect "Your_SSID" "Your_Password"
    ```
 
+### Runtime diagnostics
+
+Detailed diagnostics are off by default:
+
+```sh
+./build/out/rtw88ctl diag on
+./build/out/rtw88ctl log
+./build/out/rtw88ctl diag off
+```
+
+The optional fixed-rate modes are intended for diagnostics only. Normal use
+should remain on automatic rate adaptation:
+
+```sh
+./build/out/rtw88ctl rate auto
+```
+
 ## Troubleshooting
+
 
 You can view driver logs using `dmesg` if you're injecting it as pre-link (OpenCore):
 ```sh
