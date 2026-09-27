@@ -796,51 +796,59 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
         if (_debugTimer)
             _debugTimer->cancelTimeout();
 
-        /* Tear down the Wi-Fi association while firmware, TX and IRQ handling
-         * are still fully alive.  This mirrors a deliberate Wi-Fi off/on
-         * cycle and prevents carrying a stale CONNECTED/STA state across
-         * system sleep. */
+        /* 1.1.0 development: treat system sleep as a real Wi-Fi OFF event.
+         * First disconnect and stop rtw88 while the controller is still live,
+         * then put the controller itself into the disabled state. */
         if (_ieee80211)
             _ieee80211->suspendForSleep();
 
+        _enabled = false;
+        if (_intrSrc)
+            _intrSrc->disable();
         if (_txQueue) {
             _txQueue->stop();
             _txQueue->flush();
         }
-        if (_intrSrc)
-            _intrSrc->disable();
 
         _txStalled = false;
         setLinkStatus(kIONetworkLinkValid);
-        IOLog("rtw88: suspend complete\n");
+        IOLog("rtw88: sleep hard-off complete\n");
         return IOPMAckImplied;
     }
 
     if (!_systemSleeping)
         return IOPMAckImplied;
 
-    /* PCI config bits may be lost across system sleep. Restore them before
-     * touching MMIO or restarting rtw88 firmware/core state. */
+    /* Recreate the same ordering as a fresh controller enable: restore PCI
+     * decode/bus mastering, start rtw88, then expose TX/IRQ, and only after
+     * the controller is fully operational start a brand-new association. */
     if (_pciDev) {
         _pciDev->setMemoryEnable(true);
         _pciDev->setBusMasterEnable(true);
     }
 
     IOReturn ret = kIOReturnSuccess;
-    if (_ieee80211)
+    if (_resumeNetworkEnabled && _ieee80211)
         ret = _ieee80211->resumeFromSleep();
 
     if (ret == kIOReturnSuccess) {
-        _systemSleeping = false;
         if (_resumeNetworkEnabled) {
-            if (_intrSrc) _intrSrc->enable();
+            _enabled = true;
             if (_txQueue) _txQueue->start();
+            if (_intrSrc) _intrSrc->enable();
         }
+
+        _systemSleeping = false;
+
+        if (_resumeNetworkEnabled && _ieee80211)
+            _ieee80211->reconnectAfterWake();
+
         if (_debugTimer)
             _debugTimer->setTimeoutMS(1000);
-        IOLog("rtw88: resume complete\n");
+        IOLog("rtw88: wake hard-on complete\n");
     } else {
-        IOLog("rtw88: resume failed (0x%08x)\n", ret);
+        _enabled = false;
+        IOLog("rtw88: wake hard-on failed (0x%08x)\n", ret);
     }
 
     return IOPMAckImplied;
