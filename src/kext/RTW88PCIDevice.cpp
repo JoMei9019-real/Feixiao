@@ -277,6 +277,12 @@ extern "C" void rtw88_tx_resume_trampoline(void)
         g_pci_dev_instance->resumeTxIfStalled();
 }
 
+extern "C" void rtw88_rx_flush_trampoline(void)
+{
+    if (g_pci_dev_instance)
+        g_pci_dev_instance->flushRxQueue();
+}
+
 /* ------------------------------------------------------------------ */
 /*  IOService lifecycle                                                 */
 /* ------------------------------------------------------------------ */
@@ -385,6 +391,7 @@ bool RTW88PCIDevice::start(IOService *provider)
     /* Wire TX flow-control resume: fired from the IRQ bottom-half after tx_isr
      * frees BE ring slots, so a stalled output queue gets re-serviced. */
     rtw88_set_tx_resume_cb(rtw88_tx_resume_trampoline);
+    rtw88_set_rx_flush_cb(rtw88_rx_flush_trampoline);
     if (_intrSrc) _intrSrc->enable();
 
     /* Debug: poll BE ring + HISR/HIMR every second. Logs distinguish chip
@@ -433,8 +440,9 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 
         rtw88_diag_log(
             "rtw88: PERF 5s tx_submit=%u rx_pkts=%u rx_bytes=%u irq=%u "
-            "stalls=%u resumes=%u be_avail=%u stalled=%d\n",
+            "rx_flush=%u rx_flush_pkts=%u stalls=%u resumes=%u be_avail=%u stalled=%d\n",
             dTx, dRx, dRxb, dIrq,
+            _perfRxFlushes, _perfRxFlushPackets,
             _perfTxStallEvents, _perfTxResumeEvents,
             avail, _txStalled ? 1 : 0);
 
@@ -467,6 +475,7 @@ void RTW88PCIDevice::teardown()
     /* Stop the IRQ bottom-half from calling back into us before we tear down
      * the output queue it services. */
     rtw88_set_tx_resume_cb(nullptr);
+    rtw88_set_rx_flush_cb(nullptr);
 
     if (_debugTimer)
         _debugTimer->cancelTimeout();
@@ -778,9 +787,12 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
         return;
     }
 
-    /* Queue + flush, matching the stable main path. */
+    /* Queue frames during the active NAPI poll.  The compat layer invokes
+     * flushRxQueue() immediately after napi->poll() returns, so we batch the
+     * expensive DLIL handoff without delaying frames until a later IRQ. */
     _iface->inputPacket(m, 0, IONetworkInterface::kInputOptionQueuePacket);
-    _iface->flushInputQueue();
+    _rxQueued = true;
+    _rxQueuedCount++;
 
     _perfRxPackets++;
     _perfRxBytes += (UInt32)plen;
@@ -790,6 +802,20 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
         IONetworkStats *stats = (IONetworkStats *)nd->getBuffer();
         if (stats) stats->inputPackets++;
     }
+}
+
+void RTW88PCIDevice::flushRxQueue()
+{
+    if (!_rxQueued || !_iface)
+        return;
+
+    UInt32 batch = _rxQueuedCount;
+    _rxQueued = false;
+    _rxQueuedCount = 0;
+    _iface->flushInputQueue();
+
+    _perfRxFlushes++;
+    _perfRxFlushPackets += batch;
 }
 
 /* ------------------------------------------------------------------ */
