@@ -7,6 +7,7 @@
 
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMessage.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/network/IONetworkMedium.h>
 
@@ -23,6 +24,11 @@ OSDefineMetaClassAndStructors(RTW88PCIDevice, IOEthernetController)
 
 static constexpr unsigned int kRTW88TxStallAvail = 96;
 static constexpr unsigned int kRTW88TxResumeAvail = 160;
+
+static IOPMPowerState gRTW88PowerStates[2] = {
+    { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    { 1, kIOPMPowerOn, kIOPMPowerOn, kIOPMPowerOn, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
 
 /* ------------------------------------------------------------------ */
 /*  PCI ops shim (C linkage, called from driver C code)                */
@@ -412,6 +418,15 @@ bool RTW88PCIDevice::start(IOService *provider)
         _debugTimer->setTimeoutMS(1000);
     }
 
+    /* Register as an actual IOKit power driver.  Earlier builds only logged
+     * powerStateWillChangeTo(), leaving the firmware running across sleep and
+     * causing H2C failures after wake. */
+    PMinit();
+    provider->joinPMtree(this);
+    registerPowerDriver(this, gRTW88PowerStates, 2);
+    _pmRegistered = true;
+    changePowerStateTo(1);
+
     IOLog("rtw88: device started successfully\n");
     registerService();   /* publish IOKit port for IOServiceOpen / rtw88ctl */
     return true;
@@ -468,6 +483,10 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 void RTW88PCIDevice::stop(IOService *provider)
 {
     IOLog("rtw88: RTW88PCIDevice::stop\n");
+    if (_pmRegistered) {
+        PMstop();
+        _pmRegistered = false;
+    }
     teardown();
     super::stop(provider);
 }
@@ -652,7 +671,7 @@ IOOutputQueue *RTW88PCIDevice::createOutputQueue()
 UInt32 RTW88PCIDevice::outputPacket(mbuf_t m, void *param)
 {
     drainPendingFree();
-    if (!_enabled || !_ieee80211) {
+    if (_systemSleeping || !_enabled || !_ieee80211) {
         freePacket(m);
         return kIOReturnOutputDropped;
     }
@@ -762,6 +781,66 @@ IOReturn RTW88PCIDevice::powerStateWillChangeTo(IOPMPowerFlags flags,
     return IOPMAckImplied;
 }
 
+IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
+{
+    IOLog("rtw88: setPowerState %lu (sleeping=%d enabled=%d)\n",
+          state, _systemSleeping ? 1 : 0, _enabled ? 1 : 0);
+
+    if (state == 0) {
+        if (_systemSleeping)
+            return IOPMAckImplied;
+
+        _systemSleeping = true;
+        _resumeNetworkEnabled = _enabled;
+
+        if (_debugTimer)
+            _debugTimer->cancelTimeout();
+        if (_txQueue) {
+            _txQueue->stop();
+            _txQueue->flush();
+        }
+        if (_intrSrc)
+            _intrSrc->disable();
+
+        if (_ieee80211)
+            _ieee80211->suspendForSleep();
+
+        _txStalled = false;
+        setLinkStatus(kIONetworkLinkValid);
+        IOLog("rtw88: suspend complete\n");
+        return IOPMAckImplied;
+    }
+
+    if (!_systemSleeping)
+        return IOPMAckImplied;
+
+    /* PCI config bits may be lost across system sleep. Restore them before
+     * touching MMIO or restarting rtw88 firmware/core state. */
+    if (_pciDev) {
+        _pciDev->setMemoryEnable(true);
+        _pciDev->setBusMasterEnable(true);
+    }
+
+    IOReturn ret = kIOReturnSuccess;
+    if (_ieee80211)
+        ret = _ieee80211->resumeFromSleep();
+
+    if (ret == kIOReturnSuccess) {
+        _systemSleeping = false;
+        if (_resumeNetworkEnabled) {
+            if (_intrSrc) _intrSrc->enable();
+            if (_txQueue) _txQueue->start();
+        }
+        if (_debugTimer)
+            _debugTimer->setTimeoutMS(1000);
+        IOLog("rtw88: resume complete\n");
+    } else {
+        IOLog("rtw88: resume failed (0x%08x)\n", ret);
+    }
+
+    return IOPMAckImplied;
+}
+
 /* ------------------------------------------------------------------ */
 /*  RX injection (called from RTW88IEEE80211 on frame receive)         */
 /* ------------------------------------------------------------------ */
@@ -779,7 +858,7 @@ mbuf_t RTW88PCIDevice::allocateInputPacket(uint32_t len)
 void RTW88PCIDevice::injectRxFrame(mbuf_t m)
 {
     drainPendingFree();
-    if (!_iface || !_enabled) {
+    if (_systemSleeping || !_iface || !_enabled) {
         freePacket(m);
         return;
     }
