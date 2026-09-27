@@ -3565,7 +3565,8 @@ bool RTW88IEEE80211::txDataFrame(mbuf_t m, bool protectEapol)
     static uint32_t beta7WrapTxCount = 0;
     uint32_t beta7n = ++beta7WrapTxCount;
     bool requestTxStatus = rtw88_beta16_diag_is_enabled() &&
-                           !isEapol && ((beta7n & 127u) == 0);
+                           !isEapol && ((beta7n & 511u) == 0) &&
+                           rtw88_beta16_tx_report_can_sample(_rtwdev);
     if (requestTxStatus)
         info->flags |= IEEE80211_TX_CTL_REQ_TX_STATUS;
 
