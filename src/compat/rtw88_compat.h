@@ -195,6 +195,7 @@ void rtw88_force_wifi_only(void);
  * (post tx_isr, no locks held) so the kext can resume a stalled queue. */
 unsigned int rtw88_be_tx_avail(void);
 void rtw88_set_tx_resume_cb(void (*cb)(void));
+void rtw88_set_rx_flush_cb(void (*cb)(void));
 
 struct ieee80211_hw;
 struct ieee80211_vif;
