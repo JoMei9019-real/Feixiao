@@ -88,6 +88,8 @@ public:
     void      stop();        /* full teardown */
     IOReturn  powerOn();     /* enable: rtw_core_start */
     void      powerOff();    /* disable: rtw_core_stop */
+    void      suspendForSleep();
+    IOReturn  resumeFromSleep();
     void      handleInterrupt();
     UInt32    outputPacket(mbuf_t m);
     void      getMACAddress(uint8_t *mac);
@@ -211,6 +213,8 @@ private:
     RTW88State          _state        = RTW88_STATE_IDLE;
     RTW88State          _scanReturnState = RTW88_STATE_IDLE;
     bool                _powered      = false;
+    bool                _suspended    = false;
+    bool                _resumeAfterWake = false;
     uint8_t             _macAddr[6]   = {};
     uint32_t            _timeoutMs    = 0;
 
