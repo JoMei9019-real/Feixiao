@@ -19,13 +19,13 @@
     <string>KEXT</string>
 
     <key>CFBundleShortVersionString</key>
-    <string>1.0.8</string>
+    <string>1.1.0</string>
 
     <key>CFBundleVersion</key>
-    <string>1.0.8</string>
+    <string>1.1.0</string>
 
     <key>RTW88BuildLabel</key>
-    <string>1.0.8 RC1</string>
+    <string>1.1.0 RC1</string>
 
     <key>RTW88BuildChannel</key>
     <string>Release Candidate</string>
@@ -40,7 +40,7 @@
     <string>Copyright 2024 rtw88-macos. GPL-2.0 OR BSD-3-Clause</string>
 
     <key>OSBundleCompatibleVersion</key>
-    <string>1.0.8</string>
+    <string>1.1.0</string>
 
     <key>OSBundleLibraries</key>
     <dict>
