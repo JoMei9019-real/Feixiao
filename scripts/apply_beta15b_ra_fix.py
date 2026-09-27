@@ -210,6 +210,7 @@ rate_replacement = rate_anchor + """
 \textern int rtw88_beta15b_force_rate_mode;
 \tif (rtwdev->chip->id == RTW_CHIP_TYPE_8821C &&
 \t    sta && sta->deflink.vht_cap.vht_supported &&
+\t    be16_to_cpu(skb->protocol) != ETH_P_PAE &&
 \t    (rtw88_beta15b_force_rate_mode == 5 ||
 \t     rtw88_beta15b_force_rate_mode == 7)) {
 \t\tpkt_info->rate = DESC_RATEVHT1SS_MCS0 + rtw88_beta15b_force_rate_mode;
