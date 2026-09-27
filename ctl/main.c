@@ -26,6 +26,7 @@ enum {
     kRTW88PowerOn     = 8,
     kRTW88PowerOff    = 9,
     kRTW88SetRateMode = 10,
+    kRTW88SetDiag     = 11,
 };
 
 struct RTW88ConnectArgs {
@@ -341,6 +342,27 @@ static int cmd_rate(io_connect_t conn, const char *mode)
     return 0;
 }
 
+static int cmd_diag(io_connect_t conn, const char *mode)
+{
+    uint64_t in;
+    if (strcmp(mode, "on") == 0) in = 1;
+    else if (strcmp(mode, "off") == 0) in = 0;
+    else {
+        fprintf(stderr, "rtw88ctl: diag requires on or off\n");
+        return 1;
+    }
+
+    kern_return_t kr = IOConnectCallScalarMethod(conn, kRTW88SetDiag,
+                                                  &in, 1, NULL, NULL);
+    if (kr != KERN_SUCCESS) {
+        fprintf(stderr, "rtw88ctl: set diagnostics failed: %s\n",
+                mach_error_string(kr));
+        return 1;
+    }
+    printf("Diagnostics %s\n", mode);
+    return 0;
+}
+
 static int cmd_power(io_connect_t conn, int on)
 {
     kern_return_t kr = IOConnectCallStructMethod(conn,
@@ -374,6 +396,7 @@ static void usage(const char *argv0)
         "  log                      Dump driver log buffer\n"
         "  debug <level>            Set debug level (0=err 1=warn 2=info 3=dbg)\n"
         "  rate auto|mcs5|mcs7      Switch TX data rate test mode at runtime\n"
+        "  diag on|off               Enable/disable detailed runtime diagnostics\n"
         "\n"
         "Examples:\n"
         "  %s scan -w 10            Scan for 10 seconds\n"
@@ -448,6 +471,10 @@ int main(int argc, char *argv[])
     } else if (strcmp(cmd, "rate") == 0) {
         if (argc < 3) { fprintf(stderr, "rate requires auto, mcs5, or mcs7\n"); ret = 1; }
         else ret = cmd_rate(conn, argv[2]);
+
+    } else if (strcmp(cmd, "diag") == 0) {
+        if (argc < 3) { fprintf(stderr, "diag requires on or off\n"); ret = 1; }
+        else ret = cmd_diag(conn, argv[2]);
 
     } else {
         fprintf(stderr, "rtw88ctl: unknown command '%s'\n", cmd);
