@@ -15,7 +15,7 @@ int rtw88_log_level = KERN_DEBUG;
 struct task_struct *__rtw88_current_task = NULL;
 
 static IOSimpleLock *rtw88_log_lock = NULL;
-static char rtw88_log_ring[8192];
+static char rtw88_log_ring[65536];
 static uint32_t rtw88_log_head = 0;
 static uint32_t rtw88_log_tail = 0;
 
@@ -392,9 +392,21 @@ thread_call_t g_irq_thread_call = NULL;
  * ieee80211_iterate_active_interfaces_atomic can deliver the iterator to
  * rtw88's internal callbacks (e.g. rtw_build_rsvd_page_iter). */
 static struct ieee80211_vif *g_rtw88_vif = NULL;
+/* Feixiao currently exposes a single station-mode peer.  Keep the peer here
+ * so mac80211 station iterators used by rtw88's firmware RA-report path are
+ * not silently no-ops. */
+static struct ieee80211_sta *g_rtw88_sta = NULL;
 
 void rtw88_register_vif(struct ieee80211_vif *vif)   { g_rtw88_vif = vif; }
 void rtw88_unregister_vif(void)                       { g_rtw88_vif = NULL; }
+void rtw88_register_sta(struct ieee80211_sta *sta) {
+    g_rtw88_sta = sta;
+    rtw88_diag_log("rtw88: COMPAT STA registered for firmware RA iteration\n");
+}
+void rtw88_unregister_sta(void) {
+    g_rtw88_sta = NULL;
+    rtw88_diag_log("rtw88: COMPAT STA unregistered\n");
+}
 
 /* Kext-registered hook fired after the IRQ bottom-half (tx_isr) has run and
  * freed TX descriptors.  Runs on the thread_call thread with no rtw88 locks
@@ -632,7 +644,11 @@ void ieee80211_iterate_active_interfaces(
 void ieee80211_iterate_stations_atomic(
     struct ieee80211_hw *hw,
     void (*iterator)(void *data, struct ieee80211_sta *sta),
-    void *data) {}
+    void *data)
+{
+    if (g_rtw88_sta && iterator)
+        iterator(data, g_rtw88_sta);
+}
 
 void ieee80211_iter_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
     void (*iter)(struct ieee80211_hw *, struct ieee80211_vif *,
@@ -987,6 +1003,7 @@ void rtw88_compat_exit(void)
     g_hw_cbs        = NULL;
     g_kext_hw       = NULL;
     g_rtw88_vif     = NULL;
+    g_rtw88_sta     = NULL;
     if (rtw88_log_lock) {
         IOSimpleLockFree(rtw88_log_lock);
         rtw88_log_lock = NULL;

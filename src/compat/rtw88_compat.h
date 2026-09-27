@@ -225,5 +225,7 @@ void rtw88_restore_connected_hw(struct ieee80211_hw *hw,
  * the firmware reserved-page download after association). */
 void rtw88_register_vif(struct ieee80211_vif *vif);
 void rtw88_unregister_vif(void);
+void rtw88_register_sta(struct ieee80211_sta *sta);
+void rtw88_unregister_sta(void);
 
 #endif /* _RTW88_COMPAT_H */

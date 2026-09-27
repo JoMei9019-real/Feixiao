@@ -661,6 +661,10 @@ void RTW88IEEE80211::releaseSta()
     if (!_sta)
         return;
 
+    /* Stop firmware/C2H station iterators before the peer can be removed or
+     * freed. This mirrors the single-peer registration done after sta_add. */
+    rtw88_unregister_sta();
+
     if (_hw && _hw->ops && _hw->ops->sta_remove && _vif)
         _hw->ops->sta_remove(_hw, _vif, _sta);
 
@@ -1792,7 +1796,22 @@ void RTW88IEEE80211::reorderTimerFired(OSObject *owner, IOTimerEventSource *)
 
 void RTW88IEEE80211::txStatus(struct sk_buff *skb)
 {
-    /* Nothing to do — skb freed by caller */
+    if (!skb) return;
+    struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+
+    /* Most frames are completed optimistically by the PCI reclaim path.
+     * Beta 7 marks only sampled frames with REQ_TX_STATUS; those are held for
+     * a firmware CCX report and therefore give us a real ACK/failure result. */
+    if (info->flags & IEEE80211_TX_CTL_REQ_TX_STATUS) {
+        static uint32_t sampled = 0, acked = 0, failed = 0;
+        sampled++;
+        bool ack = (info->flags & IEEE80211_TX_STAT_ACK) != 0;
+        if (ack) acked++; else failed++;
+        rtw88_diag_log(
+            "rtw88: TXSTATUS sampled=%u ack=%u fail=%u result=%s flags=0x%08x len=%u\n",
+            sampled, acked, failed, ack ? "ACK" : "FAIL",
+            (unsigned)info->flags, (unsigned)skb->len);
+    }
 }
 
 /*
@@ -2447,7 +2466,29 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                     (unsigned)peer.has_vht, (unsigned)peer.vht_factor);
             }
 
-            _hw->ops->sta_add(_hw, _vif, _sta);
+            int staRet = _hw->ops->sta_add(_hw, _vif, _sta);
+            if (staRet == 0) {
+                rtw88_register_sta(_sta);
+                struct rtw_sta_info *si =
+                    (struct rtw_sta_info *)_sta->drv_priv;
+                rtw88_diag_log(
+                    "rtw88: LINKDIAG assoc chan=%u width=%u sta_bw=%u ht=%u vht=%u "
+                    "ht_cap=0x%04x vht_cap=0x%08x ht_factor=%u ht_density=%u "
+                    "rate_id=%u si_bw=%u si_sgi=%u si_vht=%u ra_mask=0x%llx\n",
+                    (unsigned)_targetBSS.channel, (unsigned)_connChanWidth,
+                    (unsigned)_sta->deflink.bandwidth,
+                    (unsigned)_sta->deflink.ht_cap.ht_supported,
+                    (unsigned)_sta->deflink.vht_cap.vht_supported,
+                    (unsigned)_sta->deflink.ht_cap.cap,
+                    (unsigned)_sta->deflink.vht_cap.cap,
+                    (unsigned)_sta->deflink.ht_cap.ampdu_factor,
+                    (unsigned)_sta->deflink.ht_cap.ampdu_density,
+                    (unsigned)si->rate_id, (unsigned)si->bw_mode,
+                    (unsigned)si->sgi_enable, (unsigned)si->vht_enable,
+                    (unsigned long long)si->ra_mask);
+            } else {
+                rtw88_diag_log("rtw88: sta_add failed ret=%d\n", staRet);
+            }
         }
     }
 
@@ -3465,28 +3506,32 @@ bool RTW88IEEE80211::txDataFrame(mbuf_t m, bool protectEapol)
     if (qos && _txBaActive && !isEapol)
         info->flags |= IEEE80211_TX_CTL_AMPDU;
 
-    /* Beta 6 wrapper-side TX sample.  Pair this with core TXDIAG/TXDESC to
-     * prove whether metadata changes between the macOS wrapper and rtw88. */
-    {
-        static uint32_t beta6WrapTxCount = 0;
-        uint32_t n = ++beta6WrapTxCount;
-        if (n <= 16 || (n & 63u) == 0) {
-            rtw88_diag_log(
-                "rtw88: TXWRAP n=%u eth=0x%04x ethlen=%u framelen=%u qos=%u "
-                "protected=%u eapol=%u ba=%u ampdu_flag=%u chan=%u width=%u "
-                "ht=%u vht=%u ht_factor=%u ht_density=%u sta_bw=%u\n",
-                n, ethertype, (unsigned)total, framelen, qos ? 1 : 0,
-                protected_frame ? 1 : 0, isEapol ? 1 : 0,
-                _txBaActive ? 1 : 0,
-                (info->flags & IEEE80211_TX_CTL_AMPDU) ? 1 : 0,
-                (unsigned)_targetBSS.channel, (unsigned)_connChanWidth,
-                (unsigned)_sta->deflink.ht_cap.ht_supported,
-                (unsigned)_sta->deflink.vht_cap.vht_supported,
-                (unsigned)_sta->deflink.ht_cap.ampdu_factor,
-                (unsigned)_sta->deflink.ht_cap.ampdu_density,
-                (unsigned)_sta->deflink.bandwidth);
-        }
-    };
+    /* Beta 7: one shared sequence drives both wrapper diagnostics and sparse
+     * real TX-status requests.  Sampling one in 128 data frames keeps firmware
+     * report traffic low while still giving useful ACK/failure evidence. */
+    static uint32_t beta7WrapTxCount = 0;
+    uint32_t beta7n = ++beta7WrapTxCount;
+    bool requestTxStatus = !isEapol && ((beta7n & 127u) == 0);
+    if (requestTxStatus)
+        info->flags |= IEEE80211_TX_CTL_REQ_TX_STATUS;
+
+    if (beta7n <= 16 || (beta7n & 63u) == 0) {
+        rtw88_diag_log(
+            "rtw88: TXWRAP n=%u eth=0x%04x ethlen=%u framelen=%u qos=%u "
+            "protected=%u eapol=%u ba=%u ampdu_flag=%u txstatus_req=%u "
+            "chan=%u width=%u ht=%u vht=%u ht_factor=%u ht_density=%u sta_bw=%u\n",
+            beta7n, ethertype, (unsigned)total, framelen, qos ? 1 : 0,
+            protected_frame ? 1 : 0, isEapol ? 1 : 0,
+            _txBaActive ? 1 : 0,
+            (info->flags & IEEE80211_TX_CTL_AMPDU) ? 1 : 0,
+            requestTxStatus ? 1 : 0,
+            (unsigned)_targetBSS.channel, (unsigned)_connChanWidth,
+            (unsigned)_sta->deflink.ht_cap.ht_supported,
+            (unsigned)_sta->deflink.vht_cap.vht_supported,
+            (unsigned)_sta->deflink.ht_cap.ampdu_factor,
+            (unsigned)_sta->deflink.ht_cap.ampdu_density,
+            (unsigned)_sta->deflink.bandwidth);
+    }
     info->band  = (_targetBSS.channel > 14) ? NL80211_BAND_5GHZ
                                             : NL80211_BAND_2GHZ;
     info->control.vif = _vif;
