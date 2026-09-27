@@ -25,13 +25,13 @@
     <string>1.0.8</string>
 
     <key>RTW88BuildLabel</key>
-    <string>1.0.8 Developer Beta 16</string>
+    <string>1.0.8 RC1</string>
 
     <key>RTW88BuildChannel</key>
-    <string>Developer Beta</string>
+    <string>Release Candidate</string>
 
-    <key>RTW88DeveloperBeta</key>
-    <integer>16</integer>
+    <key>RTW88ReleaseCandidate</key>
+    <integer>1</integer>
 
     <key>CFBundleSignature</key>
     <string>????</string>
