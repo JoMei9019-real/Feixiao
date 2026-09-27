@@ -376,8 +376,7 @@ static int cmd_power(io_connect_t conn, int on)
 
 static int cmd_version(io_connect_t conn)
 {
-    printf("rtw88ctl:    %s RC%u\n",
-           RTW88_VERSION_STRING, RTW88_RELEASE_CANDIDATE);
+    printf("rtw88ctl:    %s\n", RTW88_BUILD_LABEL);
 
     if (conn == MACH_PORT_NULL) {
         printf("Driver:      not loaded\n");
