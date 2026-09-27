@@ -3,11 +3,11 @@
 Feixiao is an open-source macOS kernel extension that ports the Linux `rtw88`
 driver to macOS and provides Wi-Fi support for selected Realtek PCIe adapters.
 
-The current development release is **Feixiao 1.0.8 RC1**. The 1.0.8 series
+The current development release is **Feixiao 1.1.0 RC1**. The 1.1.0 series
 contains major stability, WPA, receive-path and transmit-rate-control fixes.
 The current RC has been validated primarily on **RTL8821CE**.
 
-> **Release status:** 1.0.8 RC1 is a release candidate. The validated Beta 16
+> **Release status:** 1.1.0 RC1 is a release candidate. The validated Beta 16
 > data path is intentionally frozen; RC work is limited to release and
 > usability polishing unless a regression is discovered.
 
@@ -24,17 +24,23 @@ Feixiao currently targets these Realtek PCIe chipsets:
 ### Validation status
 
 RTL8821CE is currently the most extensively tested device. On that chipset,
-1.0.8 RC1 has been validated with 2.4 GHz and 5 GHz networking, 80 MHz VHT,
+1.1.0 RC1 has been validated with 2.4 GHz and 5 GHz networking, 80 MHz VHT,
 automatic firmware rate adaptation, WPA2, A-MPDU and runtime diagnostics.
 
 Support for the other listed PCIe chipsets remains part of the project, but
-they have not received the same level of 1.0.8 RC validation.
+they have not received the same level of 1.1.0 RC validation.
 
 **USB and SDIO variants are currently unsupported and are not planned targets.**
 
-## What works in 1.0.8 RC1
+## What works in 1.1.0 RC1
 
 ### Wi-Fi and connection handling
+
+- System sleep/wake recovery through IOKit power management.
+- Firmware/core shutdown before sleep and restart after wake.
+- Automatic reconnect to the previously associated AP after a successful wake.
+- RSSI/PHY H2C refresh is suspended while the device is asleep, preventing
+  the repeated `failed to send h2c command` state seen in earlier builds.
 
 - Native 2.4 GHz and 5 GHz scanning.
 - Open networks.
@@ -86,7 +92,7 @@ hundreds-of-entry pending queue seen in earlier beta builds.
 
 ### Version matching
 
-1.0.8 RC1 adds:
+1.1.0 RC1 adds:
 
 ```sh
 rtw88ctl version
@@ -99,8 +105,8 @@ spot an old `rtw88ctl` binary being used with a newer Kext.
 Example:
 
 ```text
-rtw88ctl:    1.0.8 RC1
-Driver:      1.0.8 RC1
+rtw88ctl:    1.1.0 RC1
+Driver:      1.1.0 RC1
 Channel:     Release Candidate
 Diagnostics: off
 TX rate:     auto
@@ -279,7 +285,7 @@ sudo rtw88ctl diag off
 ```
 
 Detailed diagnostics include the development-time RSSI, RA, PHY, TX descriptor
-and sampled TX-report information used to validate 1.0.8.
+and sampled TX-report information used to validate 1.1.0.
 
 Normal users should leave diagnostics **off** unless troubleshooting.
 
@@ -309,7 +315,7 @@ rate.
 
 ## Recommended normal configuration
 
-For normal use with 1.0.8 RC1, no special command is required after boot.
+For normal use with 1.1.0 RC1, no special command is required after boot.
 
 The defaults are:
 
@@ -486,9 +492,9 @@ When reporting an issue, include:
 - whether 2.4 GHz or 5 GHz is affected
 - relevant `rtw88ctl log` output with diagnostics enabled
 
-## Important implementation notes for 1.0.8
+## Important implementation notes for 1.1.0
 
-The 1.0.8 release line intentionally keeps the full upstream rtw88 watchdog
+The 1.1.0 release line intentionally keeps the full upstream rtw88 watchdog
 dynamic-mechanism work disabled in this macOS port. Instead, Feixiao restores
 only the pieces required for stable RSSI/rate feedback.
 
