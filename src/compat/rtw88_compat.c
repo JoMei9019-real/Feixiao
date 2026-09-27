@@ -391,11 +391,8 @@ thread_call_t g_irq_thread_call = NULL;
 /* Single active VIF — registered by the kext after add_interface so that
  * ieee80211_iterate_active_interfaces_atomic can deliver the iterator to
  * rtw88's internal callbacks (e.g. rtw_build_rsvd_page_iter). */
-static struct ieee80211_vif *g_rtw88_vif = NULL;
-/* Feixiao currently exposes a single station-mode peer.  Keep the peer here
- * so mac80211 station iterators used by rtw88's firmware RA-report path are
- * not silently no-ops. */
-static struct ieee80211_sta *g_rtw88_sta = NULL;
+/* Feixiao currently exposes a single station-mode peer.  The globals are
+ * declared above the lookup stubs so those stubs can resolve the peer. */
 
 void rtw88_register_vif(struct ieee80211_vif *vif)   { g_rtw88_vif = vif; }
 void rtw88_unregister_vif(void)                       { g_rtw88_vif = NULL; }
@@ -819,14 +816,36 @@ void ieee80211_queue_delayed_work(struct ieee80211_hw *hw,
 /*  mac80211 stubs                                                      */
 /* ------------------------------------------------------------------ */
 
+/* Single station-mode peer used by the lightweight mac80211 compatibility
+ * layer.  Definitions live in the callback/global-state section below. */
+static struct ieee80211_vif *g_rtw88_vif;
+static struct ieee80211_sta *g_rtw88_sta;
+
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
                                           const u8 *addr)
-{ (void)vif; (void)addr; return NULL; }
+{
+    if (!g_rtw88_sta || !g_rtw88_vif || !addr)
+        return NULL;
+    if (vif && vif != g_rtw88_vif)
+        return NULL;
+    if (!ether_addr_equal(g_rtw88_sta->addr, addr))
+        return NULL;
+    return g_rtw88_sta;
+}
 
 struct ieee80211_sta *ieee80211_find_sta_by_ifaddr(struct ieee80211_hw *hw,
                                                     const u8 *addr,
                                                     const u8 *localaddr)
-{ (void)hw; (void)addr; (void)localaddr; return NULL; }
+{
+    (void)hw;
+    if (!g_rtw88_sta || !g_rtw88_vif || !addr || !localaddr)
+        return NULL;
+    if (!ether_addr_equal(g_rtw88_sta->addr, addr))
+        return NULL;
+    if (!ether_addr_equal(g_rtw88_vif->addr, localaddr))
+        return NULL;
+    return g_rtw88_sta;
+}
 
 struct sk_buff *ieee80211_proberesp_get(struct ieee80211_hw *hw,
                                          struct ieee80211_vif *vif)

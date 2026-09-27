@@ -26,7 +26,7 @@ jobs:
           git -C rtw88-stable checkout d029a677c49266fad86750714eb5612becd134d3
           test "$(git -C rtw88-stable rev-parse HEAD)" = "d029a677c49266fad86750714eb5612becd134d3"
 
-      - name: Apply Beta 7 TX/RA diagnostics
+      - name: Apply shared TX/RA diagnostics
         working-directory: Feixiao
         run: python3 scripts/apply_beta7_tx_diag.py
 
@@ -63,26 +63,26 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-7.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-7.zip > Feixiao-1.0.8-Beta-7.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-8.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-8.zip > Feixiao-1.0.8-Beta-8.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-7
+          name: Feixiao-1.0.8-Beta-8
           path: |
-            Feixiao-1.0.8-Beta-7.zip
-            Feixiao-1.0.8-Beta-7.zip.sha256
+            Feixiao-1.0.8-Beta-8.zip
+            Feixiao-1.0.8-Beta-8.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.7" \
-            "Feixiao-1.0.8-Beta-7.zip" \
-            "Feixiao-1.0.8-Beta-7.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 7" \
-            --notes "Development prerelease. Beta 7 keeps the Beta 6 diagnostics, fixes SGI propagation into TX descriptors, restores the single-station mac80211 iterator used by firmware RA reports, samples real firmware TX ACK/failure status at 1/128 data frames, adds C2H/RA/TX-report diagnostics, an association RA snapshot, and expands the rtw88ctl diagnostic ring to 64 KiB. No queue-threshold, DMA re-kick, fixed-rate, or RX-path experiments are included. Main remains stable." \
+          gh release create "v1.0.8-beta.8" \
+            "Feixiao-1.0.8-Beta-8.zip" \
+            "Feixiao-1.0.8-Beta-8.zip.sha256" \
+            --title "Feixiao 1.0.8 Beta 8" \
+            --notes "Development prerelease. Beta 8 keeps the proven Beta 7 TX/RA diagnostics and SGI fix, and repairs the single-peer mac80211 station lookup functions used by the RX PHY/RSSI path. ieee80211_find_sta() and ieee80211_find_sta_by_ifaddr() now return the registered peer only when VIF/local/peer addresses match, allowing rtw88 to update per-station EWMA RSSI and feed valid RSSI information into firmware rate adaptation. No queue-threshold, DMA re-kick, fixed-rate, or RX batching experiments are included. Main remains stable." \
             --prerelease \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}"
