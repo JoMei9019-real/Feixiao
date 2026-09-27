@@ -920,9 +920,8 @@ void RTW88IEEE80211::suspendForSleep()
         (_state == RTW88_STATE_CONNECTED) ||
         (_state == RTW88_STATE_SCANNING &&
          _scanReturnState == RTW88_STATE_CONNECTED);
-    _suspended = true;
 
-    IOLog("rtw88: IEEE80211 suspend (reconnect=%d)\n",
+    IOLog("rtw88: IEEE80211 sleep hard-off (reconnect=%d)\n",
           _resumeAfterWake ? 1 : 0);
 
     if (_timer) _timer->cancelTimeout();
@@ -952,7 +951,10 @@ void RTW88IEEE80211::suspendForSleep()
         _state = RTW88_STATE_IDLE;
     }
 
+    /* Same hardware transition used by Wi-Fi power-off.  Keep the saved
+     * target/password only for a later fresh association. */
     powerOff();
+    _suspended = true;
 }
 
 IOReturn RTW88IEEE80211::resumeFromSleep()
@@ -960,7 +962,7 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
     if (!_suspended)
         return kIOReturnSuccess;
 
-    IOLog("rtw88: IEEE80211 resume\n");
+    IOLog("rtw88: IEEE80211 wake hard-on\n");
 
     IOReturn ret = powerOn();
     if (ret != kIOReturnSuccess)
@@ -968,6 +970,13 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
 
     _suspended = false;
     _manualScanAbort = false;
+    return kIOReturnSuccess;
+}
+
+void RTW88IEEE80211::reconnectAfterWake()
+{
+    if (_suspended || !_powered)
+        return;
 
     if (_rssiTimer)
         _rssiTimer->setTimeoutMS(2000);
@@ -975,15 +984,18 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
     bool reconnect = _resumeAfterWake && _targetBSS.ssid[0] != '\0';
     _resumeAfterWake = false;
 
-    if (reconnect) {
-        IOLog("rtw88: scheduling reconnect after wake to '%s'\n",
-              _targetBSS.ssid);
-        _state = RTW88_STATE_AUTHENTICATING;
-        if (_connectTC)
-            thread_call_enter(_connectTC);
-    }
+    if (!reconnect)
+        return;
 
-    return kIOReturnSuccess;
+    /* Controller TX queue and interrupt source are live before this method is
+     * called.  Start from IDLE and perform a complete auth/assoc/WPA exchange. */
+    _state = RTW88_STATE_IDLE;
+    _scanReturnState = RTW88_STATE_IDLE;
+    IOLog("rtw88: reconnecting after wake to '%s'\n", _targetBSS.ssid);
+
+    _state = RTW88_STATE_AUTHENTICATING;
+    if (_connectTC)
+        thread_call_enter(_connectTC);
 }
 
 /* ------------------------------------------------------------------ */
