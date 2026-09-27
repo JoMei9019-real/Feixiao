@@ -42,6 +42,7 @@ public:
     void     free() override;
     IOReturn powerStateWillChangeTo(IOPMPowerFlags flags, unsigned long state,
                                      IOService *actor) override;
+    IOReturn setPowerState(unsigned long state, IOService *actor) override;
 
     /* IONetworkController */
     const OSString *newVendorString() const override;
@@ -151,6 +152,9 @@ private:
     IOEthernetAddress       _macAddr;
     bool                    _enabled      = false;
     bool                    _initialized  = false;
+    bool                    _pmRegistered = false;
+    bool                    _systemSleeping = false;
+    bool                    _resumeNetworkEnabled = false;
 
     /* TX flow control: set when outputPacket() stalls the gated queue because
      * the BE ring is nearly full; cleared when the IRQ completion path frees
