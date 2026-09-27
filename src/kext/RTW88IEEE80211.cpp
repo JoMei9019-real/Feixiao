@@ -1780,6 +1780,11 @@ void RTW88IEEE80211::rxReorderFlushStale()
     for (uint32_t i = 0; i < nout; i++)
         deliverDataFrame(out[i]);
 
+    /* Timer-delivered frames are outside the NAPI poll callback, so explicitly
+     * submit this batch now rather than waiting for another interrupt. */
+    if (_parent && nout)
+        _parent->flushRxQueue();
+
     if (again)
         rxReorderArmTimer();
 }
