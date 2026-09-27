@@ -1,9 +1,6 @@
 name: Build Release Candidate
 
 on:
-  push:
-    branches:
-      - development
   workflow_dispatch:
 
 permissions:
