@@ -1,6 +1,9 @@
 name: Build Development
 
 on:
+  push:
+    branches:
+      - development
   workflow_dispatch:
 
 permissions:
@@ -27,9 +30,9 @@ jobs:
         working-directory: Feixiao
         run: python3 scripts/apply_beta7_tx_diag.py
 
-      - name: Apply Beta 13 non-blocking RSSI/RA fix
+      - name: Apply Beta 14 corrected RSSI/RA fix
         working-directory: Feixiao
-        run: python3 scripts/apply_beta13_ra_fix.py
+        run: python3 scripts/apply_beta14_ra_fix.py
 
       - name: Download firmware blobs
         run: |
@@ -64,26 +67,26 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-13.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-13.zip > Feixiao-1.0.8-Beta-13.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-14.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-14.zip > Feixiao-1.0.8-Beta-14.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-13
+          name: Feixiao-1.0.8-Beta-14
           path: |
-            Feixiao-1.0.8-Beta-13.zip
-            Feixiao-1.0.8-Beta-13.zip.sha256
+            Feixiao-1.0.8-Beta-14.zip
+            Feixiao-1.0.8-Beta-14.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.13" \
-            "Feixiao-1.0.8-Beta-13.zip" \
-            "Feixiao-1.0.8-Beta-13.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 13" \
-            --notes "Development prerelease. Beta 13 keeps the Beta 12 isolated RSSI-to-firmware-rate-adaptation path and scan-aware guards, but makes the periodic RA refresh non-blocking with mutex_trylock(). If rtwdev->mutex is busy, that 2-second refresh cycle is skipped and logged as RSSI_DBG mutex_busy instead of blocking the IOKit state-machine workloop. The generic ieee80211_find_sta* path remains disabled to avoid the Beta 8 freeze. RSSI_DBG pointer/EWMA/iteration diagnostics remain enabled; Beta 11 DMA fast-path and Beta 10 NAPI RX batching are unchanged. Main remains stable." \
+          gh release create "v1.0.8-beta.14" \
+            "Feixiao-1.0.8-Beta-14.zip" \
+            "Feixiao-1.0.8-Beta-14.zip.sha256" \
+            --title "Feixiao 1.0.8 Beta 14" \
+            --notes "Development prerelease. Beta 14 fixes the macOS compat EWMA implementation to match Linux semantics. rtw88 declares RSSI as DECLARE_EWMA(rssi, 10, 16), where 16 is the reciprocal weight (1/16), not a literal shift count. The previous compat implementation treated it as a shift, producing undefined behavior and enormous avg_rssi values, which then poisoned rssi_level and firmware RA. Beta 14 keeps the Beta 13 scan-aware, non-blocking RSSI/RA refresh, pointer/EWMA diagnostics, timestamped PERF/RSSIRA logs, Beta 11 DMA fast-path, and Beta 10 NAPI RX batching. Generic ieee80211_find_sta* remains disabled to avoid the Beta 8 freeze. Main remains stable." \
             --prerelease \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}"
