@@ -8,7 +8,8 @@
 #include <IOKit/IOLib.h>
 #include <string.h>
 
-extern "C" int rtw88_beta15b_set_rate_mode(int mode);
+extern "C" int rtw88_beta16_set_rate_mode(int mode);
+extern "C" int rtw88_beta16_set_diag_enabled(int enabled);
 
 #define super IOUserClient
 OSDefineMetaClassAndStructors(RTW88UserClient, IOUserClient)
@@ -50,6 +51,9 @@ const IOExternalMethodDispatch RTW88UserClient::sMethods[kRTW88NumSelectors] = {
       0, 0, 0, 0 },
     /* kRTW88SetRateMode: input scalar = 0(auto), 5(MCS5), 7(MCS7) */
     { (IOExternalMethodAction)&RTW88UserClient::sSetRateMode,
+      1, 0, 0, 0 },
+    /* kRTW88SetDiag: input scalar = 0(off), 1(on) */
+    { (IOExternalMethodAction)&RTW88UserClient::sSetDiag,
       1, 0, 0, 0 },
 };
 
@@ -270,6 +274,18 @@ IOReturn RTW88UserClient::sSetRateMode(RTW88UserClient *uc, void *ref,
     if (!args || args->scalarInputCount < 1)
         return kIOReturnBadArgument;
     int mode = (int)args->scalarInput[0];
-    int ret = rtw88_beta15b_set_rate_mode(mode);
+    int ret = rtw88_beta16_set_rate_mode(mode);
     return ret == 0 ? kIOReturnSuccess : kIOReturnBadArgument;
+}
+
+IOReturn RTW88UserClient::sSetDiag(RTW88UserClient *uc, void *ref,
+                                   IOExternalMethodArguments *args)
+{
+    if (!args || args->scalarInputCount < 1)
+        return kIOReturnBadArgument;
+    uint64_t enabled = args->scalarInput[0];
+    if (enabled > 1)
+        return kIOReturnBadArgument;
+    rtw88_beta16_set_diag_enabled(enabled ? 1 : 0);
+    return kIOReturnSuccess;
 }
