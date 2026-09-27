@@ -1,6 +1,9 @@
 name: Build Development
 
 on:
+  push:
+    branches:
+      - development
   workflow_dispatch:
 
 permissions:
@@ -60,26 +63,26 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-8.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-8.zip > Feixiao-1.0.8-Beta-8.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-9.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-9.zip > Feixiao-1.0.8-Beta-9.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-8
+          name: Feixiao-1.0.8-Beta-9
           path: |
-            Feixiao-1.0.8-Beta-8.zip
-            Feixiao-1.0.8-Beta-8.zip.sha256
+            Feixiao-1.0.8-Beta-9.zip
+            Feixiao-1.0.8-Beta-9.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.8-beta.8" \
-            "Feixiao-1.0.8-Beta-8.zip" \
-            "Feixiao-1.0.8-Beta-8.zip.sha256" \
-            --title "Feixiao 1.0.8 Beta 8" \
-            --notes "Development prerelease. Beta 8 keeps the proven Beta 7 TX/RA diagnostics and SGI fix, and repairs the single-peer mac80211 station lookup functions used by the RX PHY/RSSI path. ieee80211_find_sta() and ieee80211_find_sta_by_ifaddr() now return the registered peer only when VIF/local/peer addresses match, allowing rtw88 to update per-station EWMA RSSI and feed valid RSSI information into firmware rate adaptation. No queue-threshold, DMA re-kick, fixed-rate, or RX batching experiments are included. Main remains stable." \
+          gh release create "v1.0.8-beta.9" \
+            "Feixiao-1.0.8-Beta-9.zip" \
+            "Feixiao-1.0.8-Beta-9.zip.sha256" \
+            --title "Feixiao 1.0.8 Beta 9" \
+            --notes "Development prerelease. Beta 9 reverts the Beta 8 mac80211 station lookup change after a connection-time system freeze regression was observed. ieee80211_find_sta() and ieee80211_find_sta_by_ifaddr() are restored to the Beta 7 safe NULL stubs while the TX/RA diagnostics, SGI propagation, queue backpressure and aggregation work remain intact. Main remains stable." \
             --prerelease \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}"
