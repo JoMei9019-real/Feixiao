@@ -448,15 +448,41 @@ void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
     if (!_wakeRecoveryPending || !_systemSleeping)
         return;
 
-    _wakeRecoveryPending = false;
-    IOLog("rtw88: deferred wake recovery begin\n");
+    IOLog("rtw88: deferred wake recovery begin (attempt=%u)\n",
+          (unsigned)_wakeRecoveryAttempts + 1);
 
-    /* By this point the platform/PCI parent has had time to restore D0/link.
-     * Re-enable PCI decode and bus mastering before any MMIO/DMA access. */
-    if (_pciDev) {
-        _pciDev->setMemoryEnable(true);
-        _pciDev->setBusMasterEnable(true);
+    /* Do not trust the BAR mapping cached before system sleep.  First make
+     * sure PCI config space is alive, then remap BAR2 and publish the new VA
+     * before rtw88 recreates its DMA rings/core state. */
+    if (!_pciDev || _pciDev->configRead16(0x00) != 0x10ec) {
+        if (++_wakeRecoveryAttempts < 6 && _wakeTimer) {
+            IOLog("rtw88: PCI function not ready after wake; retrying\n");
+            _wakeTimer->setTimeoutMS(500);
+            return;
+        }
+        _wakeRecoveryPending = false;
+        _enabled = false;
+        IOLog("rtw88: PCI function failed to return after wake\n");
+        return;
     }
+
+    _pciDev->setMemoryEnable(true);
+    _pciDev->setBusMasterEnable(true);
+
+    if (!refreshBAR2Mapping()) {
+        if (++_wakeRecoveryAttempts < 6 && _wakeTimer) {
+            IOLog("rtw88: BAR2 remap failed after wake; retrying\n");
+            _wakeTimer->setTimeoutMS(500);
+            return;
+        }
+        _wakeRecoveryPending = false;
+        _enabled = false;
+        IOLog("rtw88: BAR2 remap permanently failed after wake\n");
+        return;
+    }
+
+    _wakeRecoveryPending = false;
+    _wakeRecoveryAttempts = 0;
 
     IOReturn ret = kIOReturnSuccess;
     if (_resumeNetworkEnabled && _ieee80211)
@@ -886,6 +912,44 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
     }
 
     return IOPMAckImplied;
+}
+
+bool RTW88PCIDevice::refreshBAR2Mapping()
+{
+    if (!_pciDev)
+        return false;
+
+    IOMemoryMap *newMap =
+        _pciDev->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2);
+    if (!newMap)
+        return false;
+
+    volatile void *newBase = (volatile void *)newMap->getVirtualAddress();
+    if (!newBase || newMap->getLength() == 0) {
+        newMap->release();
+        return false;
+    }
+
+    IOMemoryMap *oldMap = _mmioMap;
+    volatile void *oldBase = _mmioBase;
+
+    _mmioMap = newMap;
+    _mmioBase = newBase;
+
+    if (_compatPciDev) {
+        _compatPciDev->resource[2] = (resource_size_t)_mmioBase;
+        _compatPciDev->resource_len[2] =
+            (resource_size_t)_mmioMap->getLength();
+    }
+
+    IOLog("rtw88: BAR2 remapped after wake old=%p new=%p size=0x%llx\n",
+          (void *)oldBase, (void *)_mmioBase,
+          (unsigned long long)_mmioMap->getLength());
+
+    if (oldMap)
+        oldMap->release();
+
+    return true;
 }
 
 /* ------------------------------------------------------------------ */
