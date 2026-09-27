@@ -3644,16 +3644,35 @@ void RTW88IEEE80211::rssiTimerFired(OSObject *owner, IOTimerEventSource *timer)
 
 void RTW88IEEE80211::refreshRateControlRssi()
 {
-    if (_state != RTW88_STATE_CONNECTED || !_powered || !_rtwdev || !_sta)
+    /* Match the driver's existing "connected while scanning" semantics.
+     * During a manual off-channel scan, defer RA refresh until we are back on
+     * the associated channel so stale/off-channel state is never pushed into
+     * firmware. */
+    bool connected =
+        (_state == RTW88_STATE_CONNECTED) ||
+        (_state == RTW88_STATE_SCANNING &&
+         _scanReturnState == RTW88_STATE_CONNECTED &&
+         (_manualScanChannelCount == 0 || _manualScanOnHomeChannel));
+
+    if (!connected || !_powered || !_rtwdev || !_sta) {
+        rtw88_diag_log(
+            "rtw88: RSSI_DBG timer skip state=%u scan_return=%u powered=%u "
+            "sta=%p manual_scan=%u home=%u\n",
+            (unsigned)_state, (unsigned)_scanReturnState,
+            _powered ? 1U : 0U, _sta,
+            (unsigned)_manualScanChannelCount,
+            _manualScanOnHomeChannel ? 1U : 0U);
         return;
+    }
 
     /* Beta 12: prove that the state-machine STA is still exactly the peer
      * registered in the compat layer, then run only the upstream RSSI/RA
      * subset.  Generic mac80211 station lookup remains disabled. */
     bool identityMatch = rtw88_registered_sta_matches(_sta);
     rtw88_diag_log(
-        "rtw88: RSSI_DBG owner sta=%p registered_match=%u state=%u\n",
-        _sta, identityMatch ? 1U : 0U, (unsigned)_state);
+        "rtw88: RSSI_DBG owner sta=%p registered_match=%u state=%u scan_return=%u\n",
+        _sta, identityMatch ? 1U : 0U, (unsigned)_state,
+        (unsigned)_scanReturnState);
 
     if (!identityMatch) {
         rtw88_diag_log(
