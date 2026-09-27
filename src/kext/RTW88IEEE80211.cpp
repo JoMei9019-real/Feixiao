@@ -3665,7 +3665,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    /* Beta 12: prove that the state-machine STA is still exactly the peer
+    /* Beta 13: prove that the state-machine STA is still exactly the peer
      * registered in the compat layer, then run only the upstream RSSI/RA
      * subset.  Generic mac80211 station lookup remains disabled. */
     bool identityMatch = rtw88_registered_sta_matches(_sta);
@@ -3680,7 +3680,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    rtw88_beta12_ra_refresh(_rtwdev, _sta);
+    rtw88_beta13_ra_refresh(_rtwdev, _sta);
 }
 
 void RTW88IEEE80211::onTimer()
