@@ -388,6 +388,7 @@ static struct ieee80211_hw *g_rtw88_hw;
  * shims below. Static storage gives them a guaranteed NULL initial value. */
 static struct ieee80211_vif *g_rtw88_vif;
 static struct ieee80211_sta *g_rtw88_sta;
+static IOSimpleLock *g_rtw88_sta_lock;
 
 irq_handler_t g_irq_handler = NULL;
 irq_handler_t g_irq_thread_fn = NULL;
@@ -403,11 +404,15 @@ thread_call_t g_irq_thread_call = NULL;
 void rtw88_register_vif(struct ieee80211_vif *vif)   { g_rtw88_vif = vif; }
 void rtw88_unregister_vif(void)                       { g_rtw88_vif = NULL; }
 void rtw88_register_sta(struct ieee80211_sta *sta) {
+    if (g_rtw88_sta_lock) IOSimpleLockLock(g_rtw88_sta_lock);
     g_rtw88_sta = sta;
+    if (g_rtw88_sta_lock) IOSimpleLockUnlock(g_rtw88_sta_lock);
     rtw88_diag_log("rtw88: COMPAT STA registered for firmware RA iteration\n");
 }
 void rtw88_unregister_sta(void) {
+    if (g_rtw88_sta_lock) IOSimpleLockLock(g_rtw88_sta_lock);
     g_rtw88_sta = NULL;
+    if (g_rtw88_sta_lock) IOSimpleLockUnlock(g_rtw88_sta_lock);
     rtw88_diag_log("rtw88: COMPAT STA unregistered\n");
 }
 
@@ -992,10 +997,12 @@ int timer_delete_sync(struct timer_list *timer)
 
 int rtw88_compat_init(void)
 {
-    rtw88_log_lock = IOSimpleLockAlloc();
+    rtw88_log_lock   = IOSimpleLockAlloc();
+    g_rtw88_sta_lock = IOSimpleLockAlloc();
     system_wq      = alloc_workqueue("rtw88_system_wq", 0, 0);
     system_long_wq = alloc_workqueue("rtw88_long_wq",   0, 0);
-    if (!system_wq || !system_long_wq || !rtw88_log_lock) return -ENOMEM;
+    if (!system_wq || !system_long_wq || !rtw88_log_lock || !g_rtw88_sta_lock)
+        return -ENOMEM;
 
     return 0;
 }
@@ -1017,7 +1024,15 @@ void rtw88_compat_exit(void)
     g_hw_cbs        = NULL;
     g_kext_hw       = NULL;
     g_rtw88_vif     = NULL;
-    g_rtw88_sta     = NULL;
+    if (g_rtw88_sta_lock) {
+        IOSimpleLockLock(g_rtw88_sta_lock);
+        g_rtw88_sta = NULL;
+        IOSimpleLockUnlock(g_rtw88_sta_lock);
+        IOSimpleLockFree(g_rtw88_sta_lock);
+        g_rtw88_sta_lock = NULL;
+    } else {
+        g_rtw88_sta = NULL;
+    }
     if (rtw88_log_lock) {
         IOSimpleLockFree(rtw88_log_lock);
         rtw88_log_lock = NULL;
@@ -1031,6 +1046,79 @@ void rtw88_compat_exit(void)
 #include "main.h"
 #include "fw.h"
 #include "reg.h"
+
+
+/*
+ * Beta 11 safe station RSSI path.
+ *
+ * Linux normally updates si->avg_rssi from rx.c after
+ * ieee80211_find_sta_by_ifaddr().  Returning a raw station pointer from that
+ * lookup caused the Beta 8 connection-time freeze, so keep the lookup stubs
+ * returning NULL and update the single registered peer synchronously here.
+ * The spinlock only protects the pointer lifetime and tiny EWMA update; no
+ * firmware/MMIO operation is performed while it is held.
+ */
+void rtw88_record_sta_rssi(const uint8_t *peer_addr, uint8_t rssi)
+{
+    if (!peer_addr || !g_rtw88_sta_lock)
+        return;
+
+    IOSimpleLockLock(g_rtw88_sta_lock);
+    struct ieee80211_sta *sta = g_rtw88_sta;
+    if (sta && ether_addr_equal(sta->addr, peer_addr)) {
+        struct rtw_sta_info *si = (struct rtw_sta_info *)sta->drv_priv;
+        ewma_rssi_add(&si->avg_rssi, rssi);
+    }
+    IOSimpleLockUnlock(g_rtw88_sta_lock);
+}
+
+static uint8_t rtw88_beta11_rssi_level(uint8_t old_level, uint8_t rssi)
+{
+    uint8_t table[7] = {20, 34, 38, 42, 46, 50, 100};
+    uint8_t new_level = 0;
+
+    for (int i = 0; i < 7; i++)
+        if (i >= old_level)
+            table[i] += 3;
+
+    for (int i = 0; i < 7; i++) {
+        if (rssi < table[i]) {
+            new_level = (uint8_t)i;
+            break;
+        }
+    }
+    return new_level;
+}
+
+/*
+ * Run from the kext state-machine workloop, where the caller owns a valid STA.
+ * This intentionally mirrors only rtw_phy_stat_rssi_iter(): it updates the
+ * firmware RSSI monitor without re-enabling the full watchdog / RF-dynamic
+ * machinery that was disabled during the throughput investigation.
+ */
+void rtw88_refresh_sta_rssi(struct rtw_dev *rtwdev, struct ieee80211_sta *sta)
+{
+    if (!rtwdev || !sta || !test_bit(RTW_FLAG_RUNNING, rtwdev->flags))
+        return;
+
+    struct rtw_sta_info *si = (struct rtw_sta_info *)sta->drv_priv;
+    uint8_t rssi = ewma_rssi_read(&si->avg_rssi);
+    if (!rssi)
+        return;
+
+    mutex_lock(&rtwdev->mutex);
+    uint8_t old_level = si->rssi_level;
+    si->rssi_level = rtw88_beta11_rssi_level(old_level, rssi);
+    rtwdev->dm_info.pre_min_rssi = rtwdev->dm_info.min_rssi;
+    rtwdev->dm_info.min_rssi = rssi;
+    rtw_fw_send_rssi_info(rtwdev, si);
+    mutex_unlock(&rtwdev->mutex);
+
+    rtw88_diag_log(
+        "rtw88: RSSIRA rssi=%u level=%u->%u macid=%u\n",
+        (unsigned)rssi, (unsigned)old_level,
+        (unsigned)si->rssi_level, (unsigned)si->mac_id);
+}
 
 void rtw88_log_sta_ra_snapshot(struct ieee80211_sta *sta)
 {
