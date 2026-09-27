@@ -44,6 +44,11 @@ int rtw88_beta16_set_rate_mode(int mode)
     return 0;
 }
 
+int rtw88_beta16_get_rate_mode(void)
+{
+    return __atomic_load_n(&rtw88_beta16_force_rate_mode, __ATOMIC_ACQUIRE);
+}
+
 struct task_struct *__rtw88_current_task = NULL;
 
 static IOSimpleLock *rtw88_log_lock = NULL;
