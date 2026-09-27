@@ -2,7 +2,7 @@
 #pragma once
 
 #define RTW88_VERSION_STRING        "1.1.0"
-#define RTW88_BUILD_LABEL           "1.1.0 Development"
+#define RTW88_BUILD_LABEL           "1.1.0 Development 1.0"
 #define RTW88_BUILD_CHANNEL         "Development"
 #define RTW88_RELEASE_CANDIDATE     0
 
