@@ -10,6 +10,8 @@
 
 extern "C" int rtw88_beta16_set_rate_mode(int mode);
 extern "C" int rtw88_beta16_set_diag_enabled(int enabled);
+extern "C" int rtw88_beta16_diag_is_enabled(void);
+extern "C" int rtw88_beta16_get_rate_mode(void);
 
 #define super IOUserClient
 OSDefineMetaClassAndStructors(RTW88UserClient, IOUserClient)
@@ -55,6 +57,9 @@ const IOExternalMethodDispatch RTW88UserClient::sMethods[kRTW88NumSelectors] = {
     /* kRTW88SetDiag: input scalar = 0(off), 1(on) */
     { (IOExternalMethodAction)&RTW88UserClient::sSetDiag,
       1, 0, 0, 0 },
+    /* kRTW88GetVersion: output struct = RTW88VersionResult */
+    { (IOExternalMethodAction)&RTW88UserClient::sGetVersion,
+      0, 0, 0, sizeof(RTW88VersionResult) },
 };
 
 /* ------------------------------------------------------------------ */
@@ -287,5 +292,27 @@ IOReturn RTW88UserClient::sSetDiag(RTW88UserClient *uc, void *ref,
     if (enabled > 1)
         return kIOReturnBadArgument;
     rtw88_beta16_set_diag_enabled(enabled ? 1 : 0);
+    return kIOReturnSuccess;
+}
+
+IOReturn RTW88UserClient::sGetVersion(RTW88UserClient *uc, void *ref,
+                                      IOExternalMethodArguments *args)
+{
+    if (!args || !args->structureOutput ||
+        args->structureOutputSize < sizeof(RTW88VersionResult))
+        return kIOReturnBadArgument;
+
+    RTW88VersionResult *result =
+        (RTW88VersionResult *)args->structureOutput;
+    memset(result, 0, sizeof(*result));
+    strlcpy(result->version, RTW88_VERSION_STRING, sizeof(result->version));
+    strlcpy(result->build_label, RTW88_BUILD_LABEL, sizeof(result->build_label));
+    strlcpy(result->build_channel, RTW88_BUILD_CHANNEL,
+            sizeof(result->build_channel));
+    result->rc_number = RTW88_RELEASE_CANDIDATE;
+    result->rate_mode = rtw88_beta16_get_rate_mode();
+    result->diagnostics_enabled =
+        rtw88_beta16_diag_is_enabled() ? 1 : 0;
+    args->structureOutputSize = sizeof(*result);
     return kIOReturnSuccess;
 }
