@@ -7,7 +7,7 @@
 
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMessage.h>
-#include <IOKit/pwr_mgt/IOPMLib.h>
+#include <IOKit/pwr_mgt/IOPM.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/network/IONetworkMedium.h>
 
