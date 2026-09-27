@@ -1072,11 +1072,33 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
                     h3->addr1[0], h3->addr1[1], h3->addr1[2],
                     h3->addr1[3], h3->addr1[4], h3->addr1[5]);
             }
+            /* Beta 15: AP-originated disconnect must tear down the same
+             * station state as a local disconnect, but must not transmit a
+             * deauth back to an AP that already removed us.  The old path only
+             * flipped _state to IDLE and left _sta/g_rtw88_sta registered,
+             * causing stale RSSI writes and Device Busy/reconnect failures. */
             clearKeys();
             _txBaActive = false;
             rxBaTeardownAll();
+            _manualScanAbort = true;
+
+            if (_vif) {
+                struct ieee80211_bss_conf *bss = &_vif->bss_conf;
+                bss->assoc = false;
+                _vif->cfg.assoc = false;
+                _vif->cfg.aid = 0;
+                if (_hw && _hw->ops && _hw->ops->bss_info_changed)
+                    _hw->ops->bss_info_changed(_hw, _vif, bss,
+                                               BSS_CHANGED_ASSOC);
+            }
+
+            releaseSta();
             _state = RTW88_STATE_IDLE;
             _scanReturnState = RTW88_STATE_IDLE;
+            _timer->cancelTimeout();
+            rtw88_diag_log(
+                "rtw88: AP disconnect cleanup complete sta=%p state=%u\n",
+                _sta, (unsigned)_state);
             if (_parent)
                 _parent->setLinkStatus(kIONetworkLinkValid);
         }
@@ -2903,6 +2925,28 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
         return;
     }
 
+    /* Beta 15: retransmitted WPA2 M3 after we already entered CONNECTED
+     * means the AP did not accept/receive our first M4.  Re-validate MIC and
+     * replay counter, then resend M4 only.  Never reinstall PTK/GTK here:
+     * reinstalling keys on a duplicate M3 would reset replay state. */
+    if (_state == RTW88_STATE_CONNECTED && is_m3) {
+        if (!eapol_mic_ok(_ptk, data, eapol_len)) {
+            rtw88_diag_log(
+                "rtw88: duplicate M3 MIC check failed; ignoring\n");
+            return;
+        }
+        if (memcmp(data + 9, _replayCtr, sizeof(_replayCtr)) != 0) {
+            rtw88_diag_log(
+                "rtw88: duplicate M3 replay mismatch; ignoring without key reinstall\n");
+            return;
+        }
+
+        rtw88_diag_log(
+            "rtw88: duplicate M3 while connected; resending M4 without key reinstall\n");
+        sendEAPOLKey(4, _replayCtr, false, false, true);
+        return;
+    }
+
     if (_state != RTW88_STATE_HANDSHAKING)
         return;
 
@@ -3665,7 +3709,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    /* Beta 14: prove that the state-machine STA is still exactly the peer
+    /* Beta 15: prove that the state-machine STA is still exactly the peer
      * registered in the compat layer, then run only the upstream RSSI/RA
      * subset.  Generic mac80211 station lookup remains disabled. */
     bool identityMatch = rtw88_registered_sta_matches(_sta);
@@ -3680,7 +3724,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    rtw88_beta14_ra_refresh(_rtwdev, _sta);
+    rtw88_beta15_ra_refresh(_rtwdev, _sta);
 }
 
 void RTW88IEEE80211::onTimer()
