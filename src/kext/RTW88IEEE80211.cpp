@@ -1072,7 +1072,7 @@ void RTW88IEEE80211::processRxMgmt(struct sk_buff *skb)
                     h3->addr1[0], h3->addr1[1], h3->addr1[2],
                     h3->addr1[3], h3->addr1[4], h3->addr1[5]);
             }
-            /* Beta 15a: AP-originated disconnect must tear down the same
+            /* Beta 15b: AP-originated disconnect must tear down the same
              * station state as a local disconnect, but must not transmit a
              * deauth back to an AP that already removed us.  The old path only
              * flipped _state to IDLE and left _sta/g_rtw88_sta registered,
@@ -2925,7 +2925,7 @@ void RTW88IEEE80211::handleEAPOL(const uint8_t *data, uint32_t len)
         return;
     }
 
-    /* Beta 15a: retransmitted WPA2 M3 after we already entered CONNECTED
+    /* Beta 15b: retransmitted WPA2 M3 after we already entered CONNECTED
      * means the AP did not accept/receive our first M4.  Re-validate MIC and
      * replay counter, then resend M4 only.  Never reinstall PTK/GTK here:
      * reinstalling keys on a duplicate M3 would reset replay state. */
@@ -3709,7 +3709,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    /* Beta 15a: prove that the state-machine STA is still exactly the peer
+    /* Beta 15b: prove that the state-machine STA is still exactly the peer
      * registered in the compat layer, then run only the upstream RSSI/RA
      * subset.  Generic mac80211 station lookup remains disabled. */
     bool identityMatch = rtw88_registered_sta_matches(_sta);
@@ -3724,7 +3724,7 @@ void RTW88IEEE80211::refreshRateControlRssi()
         return;
     }
 
-    rtw88_beta15a_ra_refresh(_rtwdev, _sta);
+    rtw88_beta15b_ra_refresh(_rtwdev, _sta);
 }
 
 void RTW88IEEE80211::onTimer()
