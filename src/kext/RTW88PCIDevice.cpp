@@ -418,6 +418,17 @@ bool RTW88PCIDevice::start(IOService *provider)
         _debugTimer->setTimeoutMS(1000);
     }
 
+    /* Wake recovery must not touch PCI/MMIO directly from setPowerState(1).
+     * On some systems the child power callback runs before the PCIe function
+     * and link are fully usable.  Defer the real WLAN hard-on until the
+     * platform wake has settled. */
+    _wakeTimer = IOTimerEventSource::timerEventSource(
+        this, OSMemberFunctionCast(IOTimerEventSource::Action,
+                                   this, &RTW88PCIDevice::wakeRecoveryFired));
+    if (!_wakeTimer)
+        return false;
+    _workLoop->addEventSource(_wakeTimer);
+
     /* Register as an actual IOKit power driver.  Earlier builds only logged
      * powerStateWillChangeTo(), leaving the firmware running across sleep and
      * causing H2C failures after wake. */
@@ -430,6 +441,48 @@ bool RTW88PCIDevice::start(IOService *provider)
     IOLog("rtw88: device started successfully\n");
     registerService();   /* publish IOKit port for IOServiceOpen / rtw88ctl */
     return true;
+}
+
+void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
+{
+    if (!_wakeRecoveryPending || !_systemSleeping)
+        return;
+
+    _wakeRecoveryPending = false;
+    IOLog("rtw88: deferred wake recovery begin\n");
+
+    /* By this point the platform/PCI parent has had time to restore D0/link.
+     * Re-enable PCI decode and bus mastering before any MMIO/DMA access. */
+    if (_pciDev) {
+        _pciDev->setMemoryEnable(true);
+        _pciDev->setBusMasterEnable(true);
+    }
+
+    IOReturn ret = kIOReturnSuccess;
+    if (_resumeNetworkEnabled && _ieee80211)
+        ret = _ieee80211->resumeFromSleep();
+
+    if (ret != kIOReturnSuccess) {
+        _enabled = false;
+        IOLog("rtw88: deferred wake recovery failed (0x%08x)\n", ret);
+        return;
+    }
+
+    if (_resumeNetworkEnabled) {
+        _enabled = true;
+        if (_txQueue) _txQueue->start();
+        if (_intrSrc) _intrSrc->enable();
+    }
+
+    _systemSleeping = false;
+
+    if (_resumeNetworkEnabled && _ieee80211)
+        _ieee80211->reconnectAfterWake();
+
+    if (_debugTimer)
+        _debugTimer->setTimeoutMS(1000);
+
+    IOLog("rtw88: deferred wake recovery complete\n");
 }
 
 void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
@@ -508,6 +561,8 @@ void RTW88PCIDevice::teardown()
 
     if (_debugTimer)
         _debugTimer->cancelTimeout();
+    if (_wakeTimer)
+        _wakeTimer->cancelTimeout();
     if (_intrSrc)
         _intrSrc->disable();
     if (_txQueue) {
@@ -523,6 +578,7 @@ void RTW88PCIDevice::teardown()
     rtw88_compat_exit();
 
     if (_debugTimer) { _debugTimer->cancelTimeout(); _workLoop->removeEventSource(_debugTimer); _debugTimer->release(); _debugTimer = nullptr; }
+    if (_wakeTimer)  { _wakeTimer->cancelTimeout();  _workLoop->removeEventSource(_wakeTimer);  _wakeTimer->release();  _wakeTimer = nullptr; }
     if (_intrSrc)  { _workLoop->removeEventSource(_intrSrc); _intrSrc->release();  _intrSrc = nullptr; }
     if (_cmdGate)  { _workLoop->removeEventSource(_cmdGate); _cmdGate->release();  _cmdGate = nullptr; }
     if (_txQueue)  { _txQueue->release();   _txQueue = nullptr; }
@@ -819,36 +875,14 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
     if (!_systemSleeping)
         return IOPMAckImplied;
 
-    /* Recreate the same ordering as a fresh controller enable: restore PCI
-     * decode/bus mastering, start rtw88, then expose TX/IRQ, and only after
-     * the controller is fully operational start a brand-new association. */
-    if (_pciDev) {
-        _pciDev->setMemoryEnable(true);
-        _pciDev->setBusMasterEnable(true);
-    }
-
-    IOReturn ret = kIOReturnSuccess;
-    if (_resumeNetworkEnabled && _ieee80211)
-        ret = _ieee80211->resumeFromSleep();
-
-    if (ret == kIOReturnSuccess) {
-        if (_resumeNetworkEnabled) {
-            _enabled = true;
-            if (_txQueue) _txQueue->start();
-            if (_intrSrc) _intrSrc->enable();
-        }
-
-        _systemSleeping = false;
-
-        if (_resumeNetworkEnabled && _ieee80211)
-            _ieee80211->reconnectAfterWake();
-
-        if (_debugTimer)
-            _debugTimer->setTimeoutMS(1000);
-        IOLog("rtw88: wake hard-on complete\n");
-    } else {
-        _enabled = false;
-        IOLog("rtw88: wake hard-on failed (0x%08x)\n", ret);
+    /* Do not touch the WLAN hardware here.  IOKit may invoke our child power
+     * callback while the parent PCIe function/link is still settling.  Keep
+     * the data path blocked and perform the real hard-on asynchronously. */
+    if (_wakeTimer) {
+        _wakeRecoveryPending = true;
+        _wakeTimer->cancelTimeout();
+        _wakeTimer->setTimeoutMS(1500);
+        IOLog("rtw88: wake detected; deferred recovery scheduled\n");
     }
 
     return IOPMAckImplied;
