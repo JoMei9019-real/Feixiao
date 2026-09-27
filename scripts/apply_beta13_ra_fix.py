@@ -124,7 +124,7 @@ void rtw88_beta13_ra_refresh(struct rtw_dev *rtwdev,
 
 	/*
 	 * Stock rtw_phy_ra_info_update() executes once every four watchdog runs.
-	 * Refresh immediately on a level transition, otherwise every fourth Beta-12
+	 * Refresh immediately on a level transition, otherwise every fourth Beta-13
 	 * timer tick, so firmware sees the updated RSSI-dependent RA mask without
 	 * enabling the rest of rtw_phy_dynamic_mechanism().
 	 */
