@@ -578,6 +578,12 @@ bool RTW88IEEE80211::init(RTW88PCIDevice *dev, struct pci_dev *pci)
     if (!_timer) return false;
     _wl->addEventSource(_timer);
 
+    _rssiTimer = IOTimerEventSource::timerEventSource(this,
+        &RTW88IEEE80211::rssiTimerFired);
+    if (!_rssiTimer) return false;
+    _wl->addEventSource(_rssiTimer);
+    _rssiTimer->setTimeoutMS(2000);
+
     _addbaRetryTimer = IOTimerEventSource::timerEventSource(this,
         &RTW88IEEE80211::addbaRetryFired);
     if (!_addbaRetryTimer) return false;
@@ -602,6 +608,8 @@ bool RTW88IEEE80211::init(RTW88PCIDevice *dev, struct pci_dev *pci)
 
 void RTW88IEEE80211::free()
 {
+    if (_rssiTimer)
+        _rssiTimer->cancelTimeout();
     clearKeys();
     releaseSta();
     rxBaTeardownAll();
@@ -616,6 +624,7 @@ void RTW88IEEE80211::free()
     if (_manualScanTC) { thread_call_cancel(_manualScanTC); thread_call_free(_manualScanTC); _manualScanTC = nullptr; }
     if (_connectTC) { thread_call_cancel(_connectTC); thread_call_free(_connectTC); _connectTC = nullptr; }
     if (_addbaRetryTimer) { _addbaRetryTimer->cancelTimeout(); _wl->removeEventSource(_addbaRetryTimer); _addbaRetryTimer->release(); _addbaRetryTimer = nullptr; }
+    if (_rssiTimer) { _rssiTimer->cancelTimeout(); _wl->removeEventSource(_rssiTimer); _rssiTimer->release(); _rssiTimer = nullptr; }
     if (_timer)  { _wl->removeEventSource(_timer); _timer->release();  _timer = nullptr; }
     if (_gate)   { _wl->removeEventSource(_gate);  _gate->release();   _gate = nullptr; }
     if (_wl)     { _wl->release();   _wl = nullptr; }
@@ -3615,6 +3624,33 @@ void RTW88IEEE80211::timerFired(OSObject *owner, IOTimerEventSource *timer)
 {
     RTW88IEEE80211 *self = OSDynamicCast(RTW88IEEE80211, owner);
     if (self) self->onTimer();
+}
+
+
+void RTW88IEEE80211::rssiTimerFired(OSObject *owner, IOTimerEventSource *timer)
+{
+    RTW88IEEE80211 *self = OSDynamicCast(RTW88IEEE80211, owner);
+    if (!self)
+        return;
+
+    self->refreshRateControlRssi();
+
+    /* Keep this deliberately slow: Linux refreshes this as part of its
+     * watchdog, not per packet.  Two seconds is enough to keep firmware RA
+     * informed without creating an H2C flood. */
+    if (self->_rssiTimer)
+        self->_rssiTimer->setTimeoutMS(2000);
+}
+
+void RTW88IEEE80211::refreshRateControlRssi()
+{
+    if (_state != RTW88_STATE_CONNECTED || !_powered || !_rtwdev || !_sta)
+        return;
+
+    /* This timer runs on the state-machine workloop, i.e. the same serialized
+     * context that owns association/disconnect.  No mac80211 station lookup is
+     * performed and the STA is never returned to another asynchronous caller. */
+    rtw88_refresh_sta_rssi(_rtwdev, _sta);
 }
 
 void RTW88IEEE80211::onTimer()
