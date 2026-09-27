@@ -3647,10 +3647,21 @@ void RTW88IEEE80211::refreshRateControlRssi()
     if (_state != RTW88_STATE_CONNECTED || !_powered || !_rtwdev || !_sta)
         return;
 
-    /* This timer runs on the state-machine workloop, i.e. the same serialized
-     * context that owns association/disconnect.  No mac80211 station lookup is
-     * performed and the STA is never returned to another asynchronous caller. */
-    rtw88_refresh_sta_rssi(_rtwdev, _sta);
+    /* Beta 12: prove that the state-machine STA is still exactly the peer
+     * registered in the compat layer, then run only the upstream RSSI/RA
+     * subset.  Generic mac80211 station lookup remains disabled. */
+    bool identityMatch = rtw88_registered_sta_matches(_sta);
+    rtw88_diag_log(
+        "rtw88: RSSI_DBG owner sta=%p registered_match=%u state=%u\n",
+        _sta, identityMatch ? 1U : 0U, (unsigned)_state);
+
+    if (!identityMatch) {
+        rtw88_diag_log(
+            "rtw88: RSSI_DBG owner mismatch; RA refresh skipped to avoid stale STA\n");
+        return;
+    }
+
+    rtw88_beta12_ra_refresh(_rtwdev, _sta);
 }
 
 void RTW88IEEE80211::onTimer()
