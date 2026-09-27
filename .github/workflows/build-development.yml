@@ -1,6 +1,9 @@
 name: Build Development
 
 on:
+  push:
+    branches:
+      - development
   workflow_dispatch:
 
 permissions:
@@ -27,9 +30,9 @@ jobs:
         working-directory: Feixiao
         run: python3 scripts/apply_beta7_tx_diag.py
 
-      - name: Apply Beta 15b TX diagnostics
+      - name: Apply Beta 16 stable RTL8821C TX fix
         working-directory: Feixiao
-        run: python3 scripts/apply_beta15b_ra_fix.py
+        run: python3 scripts/apply_beta16_ra_fix.py
 
       - name: Download firmware blobs
         run: |
@@ -64,40 +67,40 @@ jobs:
           mkdir -p Development
           cp -R Feixiao/build/out/rtw88.kext Development/
           cp Feixiao/build/out/rtw88ctl Development/
-          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-15b.zip
-          shasum -a 256 Feixiao-1.0.8-Beta-15b.zip > Feixiao-1.0.8-Beta-15b.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent Development Feixiao-1.0.8-Beta-16.zip
+          shasum -a 256 Feixiao-1.0.8-Beta-16.zip > Feixiao-1.0.8-Beta-16.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.0.8-Beta-15b
+          name: Feixiao-1.0.8-Beta-16
           path: |
-            Feixiao-1.0.8-Beta-15b.zip
-            Feixiao-1.0.8-Beta-15b.zip.sha256
+            Feixiao-1.0.8-Beta-16.zip
+            Feixiao-1.0.8-Beta-16.zip.sha256
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v1.0.8-beta.15b"
+          TAG="v1.0.8-beta.16"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "Feixiao-1.0.8-Beta-15b.zip" \
-              "Feixiao-1.0.8-Beta-15b.zip.sha256" \
+              "Feixiao-1.0.8-Beta-16.zip" \
+              "Feixiao-1.0.8-Beta-16.zip.sha256" \
               --clobber \
               --repo "${{ github.repository }}"
             gh release edit "$TAG" \
-              --title "Feixiao 1.0.8 Beta 15b" \
-              --notes "Development prerelease. Beta 15b keeps Beta 15/15a WPA, disconnect, RSSI and PHYINFO behavior. For RTL8821CE it forces TX STBC off and adds a runtime diagnostic TX-rate selector via rtw88ctl: rate auto, rate mcs5, or rate mcs7. Fixed modes affect VHT unicast data descriptors only, set USE_RATE and disable firmware fallback so hardware capability can be tested independently of firmware RA. Auto remains the default after boot. No RRSR/DIG/DPK/power tracking changes; DMA/NAPI remain unchanged. Main remains stable." \
+              --title "Feixiao 1.0.8 Beta 16" \
+              --notes "Development prerelease. Beta 16 promotes the successful RTL8821CE performance fix from Beta 15b: firmware auto rate adaptation is the default and TX STBC is forced off for RTL8821CE. Detailed diagnostics are retained but are disabled by default; use 'rtw88ctl diag on' to enable rtw88_diag_log output and sparse TX-status/TXRPT sampling, and 'rtw88ctl diag off' to disable both again without rebooting. The optional 'rate mcs5/mcs7' diagnostic modes remain available, while 'rate auto' is the boot default. WPA duplicate-M3 handling, AP disconnect cleanup, corrected RSSI EWMA, stable RA mask behavior and PHYINFO feedback are retained. Main remains stable." \
               --prerelease \
               --target "${{ github.sha }}" \
               --repo "${{ github.repository }}"
           else
             gh release create "$TAG" \
-              "Feixiao-1.0.8-Beta-15b.zip" \
-              "Feixiao-1.0.8-Beta-15b.zip.sha256" \
-              --title "Feixiao 1.0.8 Beta 15b" \
-              --notes "Development prerelease. Beta 15b keeps Beta 15/15a WPA, disconnect, RSSI and PHYINFO behavior. For RTL8821CE it forces TX STBC off and adds a runtime diagnostic TX-rate selector via rtw88ctl: rate auto, rate mcs5, or rate mcs7. Fixed modes affect VHT unicast data descriptors only, set USE_RATE and disable firmware fallback so hardware capability can be tested independently of firmware RA. Auto remains the default after boot. No RRSR/DIG/DPK/power tracking changes; DMA/NAPI remain unchanged. Main remains stable." \
+              "Feixiao-1.0.8-Beta-16.zip" \
+              "Feixiao-1.0.8-Beta-16.zip.sha256" \
+              --title "Feixiao 1.0.8 Beta 16" \
+              --notes "Development prerelease. Beta 16 promotes the successful RTL8821CE performance fix from Beta 15b: firmware auto rate adaptation is the default and TX STBC is forced off for RTL8821CE. Detailed diagnostics are retained but are disabled by default; use 'rtw88ctl diag on' to enable rtw88_diag_log output and sparse TX-status/TXRPT sampling, and 'rtw88ctl diag off' to disable both again without rebooting. The optional 'rate mcs5/mcs7' diagnostic modes remain available, while 'rate auto' is the boot default. WPA duplicate-M3 handling, AP disconnect cleanup, corrected RSSI EWMA, stable RA mask behavior and PHYINFO feedback are retained. Main remains stable." \
               --prerelease \
               --target "${{ github.sha }}" \
               --repo "${{ github.repository }}"
