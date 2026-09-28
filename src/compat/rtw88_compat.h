@@ -185,6 +185,23 @@ void rtw88_reenable_interrupt(void);
  * kext's debug timer to diagnose TX freeze; see rtw88_compat.c. */
 void rtw88_debug_dump_tx_state(void);
 
+/* Development 1.3: compact awake-only PCI health snapshot used by the
+ * automatic dead-card recovery watchdog. */
+struct rtw88_pci_health {
+    uint32_t hw_wp;
+    uint32_t hw_rp;
+    uint32_t sw_wp;
+    uint32_t sw_rp;
+    uint32_t qlen;
+    uint32_t txdma_status;
+    uint16_t pkt_empty;
+    uint16_t reserved;
+    uint32_t rx_rp;
+    uint32_t rx_hw_wp;
+    uint32_t hisr0;
+};
+bool rtw88_get_pci_health(struct rtw88_pci_health *out);
+
 /* Force-disable BT coexistence by clearing efuse.btcoex. Must be called
  * between rtw_pci_probe and the chip's start() op. See rtw88_compat.c. */
 void rtw88_force_wifi_only(void);

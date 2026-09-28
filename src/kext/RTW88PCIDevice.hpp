@@ -73,8 +73,11 @@ public:
                            UInt32 type, OSDictionary *properties,
                            IOUserClient **handler) override;
 
-    /* Full runtime recovery used by rtw88ctl reset. */
+    /* Full runtime recovery used by rtw88ctl reset and automatic recovery. */
     IOReturn resetWireless();
+
+    /* Monotonic byte counters for rtw88ctl status. */
+    void getCumulativeStats(UInt32 *txBytes, UInt32 *rxBytes) const;
 
     /* Called from interrupt handler */
     void handleInterrupt(IOInterruptEventSource *src, int count);
@@ -138,6 +141,7 @@ private:
 
     void debugTimerFired(IOTimerEventSource *src);
     void wakeRecoveryFired(IOTimerEventSource *src);
+    void postWakeResetFired(IOTimerEventSource *src);
 
     IOPCIDevice            *_pciDev       = nullptr;
     IOMemoryMap            *_mmioMap      = nullptr;
@@ -147,6 +151,7 @@ private:
     IOInterruptEventSource *_intrSrc      = nullptr;
     IOTimerEventSource     *_debugTimer   = nullptr;
     IOTimerEventSource     *_wakeTimer    = nullptr;
+    IOTimerEventSource     *_postWakeResetTimer = nullptr;
     IOEthernetInterface    *_iface        = nullptr;
     IOGatedOutputQueue     *_txQueue      = nullptr;
     bool                    _rxQueued      = false;
@@ -163,9 +168,14 @@ private:
     bool                    _resumeNetworkEnabled = false;
     bool                    _wakeRecoveryPending = false;
     UInt32                  _wakeRecoveryAttempts = 0;
-    UInt32                  _postWakeHealthTicks = 0;
-    UInt32                  _postWakeStallTicks = 0;
-    bool                    _autoWakeResetAttempted = false;
+    bool                    _postWakeResetPending = false;
+    bool                    _resetInProgress = false;
+    UInt32                  _deadCardConfirmTicks = 0;
+    UInt32                  _deadCardCooldownTicks = 0;
+    UInt32                  _deadPrevHwWp = 0;
+    UInt32                  _deadPrevHwRp = 0;
+    UInt32                  _deadPrevSwWp = 0;
+    UInt32                  _deadPrevIrq = 0;
 
     /* TX flow control: set when outputPacket() stalls the gated queue because
      * the BE ring is nearly full; cleared when the IRQ completion path frees
@@ -176,6 +186,8 @@ private:
      * DMA, interrupt, or rate-control behaviour; they are sampled by the
      * existing 1 s debug timer and emitted every 5 s. */
     volatile UInt32         _perfTxSubmitted   = 0;
+    volatile UInt32         _totalTxBytes       = 0;
+    volatile UInt32         _totalRxBytes       = 0;
     volatile UInt32         _perfTxStallEvents = 0;
     volatile UInt32         _perfTxResumeEvents= 0;
     volatile UInt32         _perfRxPackets     = 0;

@@ -88,7 +88,7 @@ public:
     void      stop();        /* full teardown */
     IOReturn  powerOn();     /* enable: rtw_core_start */
     void      powerOff();    /* disable: rtw_core_stop */
-    void      suspendForSleep();
+    void      suspendForSleep(bool forceReconnect = false);
     IOReturn  finishSleepPowerOff();
     IOReturn  resumeFromSleep();
     void      reconnectAfterWake();
@@ -123,6 +123,8 @@ private:
     void      setConnectedChandef(struct ieee80211_channel *chan);
     void      doHandshake(const uint8_t *eapol, uint32_t len);
     void      doDisconnect();
+    void      cancelConnectWork(bool wait);
+    void      scheduleConnectWork();
     void      clearKeys();
     void      releaseSta();
     bool      abortActiveScan(bool waitForIdle);

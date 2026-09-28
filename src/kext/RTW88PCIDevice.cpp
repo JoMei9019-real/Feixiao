@@ -429,6 +429,13 @@ bool RTW88PCIDevice::start(IOService *provider)
         return false;
     _workLoop->addEventSource(_wakeTimer);
 
+    _postWakeResetTimer = IOTimerEventSource::timerEventSource(
+        this, OSMemberFunctionCast(IOTimerEventSource::Action,
+                                   this, &RTW88PCIDevice::postWakeResetFired));
+    if (!_postWakeResetTimer)
+        return false;
+    _workLoop->addEventSource(_postWakeResetTimer);
+
     /* Register as an actual IOKit power driver.  Earlier builds only logged
      * powerStateWillChangeTo(), leaving the firmware running across sleep and
      * causing H2C failures after wake. */
@@ -507,43 +514,108 @@ void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
     if (_resumeNetworkEnabled && _ieee80211)
         _ieee80211->reconnectAfterWake();
 
-    /* Watch the first 15 seconds after wake.  Three consecutive seconds of
-     * flow-control stall trigger exactly one automatic full reset. */
-    _postWakeHealthTicks = 15;
-    _postWakeStallTicks = 0;
-    _autoWakeResetAttempted = false;
+    /* The RTL8821CE test system can wake cleanly and lose MMIO/DMA a few
+     * seconds later.  Schedule one deliberate stabilising reset at +5s.
+     * The general dead-card watchdog takes over after that reset. */
+    _postWakeResetPending = _resumeNetworkEnabled;
+    if (_postWakeResetPending && _postWakeResetTimer) {
+        _postWakeResetTimer->cancelTimeout();
+        _postWakeResetTimer->setTimeoutMS(5000);
+    }
+
+    _deadCardConfirmTicks = 0;
+    _deadCardCooldownTicks = 7;
 
     if (_debugTimer)
         _debugTimer->setTimeoutMS(1000);
 
-    IOLog("rtw88: deferred wake recovery complete; TX health watch armed\n");
+    IOLog("rtw88: deferred wake recovery complete; post-wake reset scheduled=%d\n",
+          _postWakeResetPending ? 1 : 0);
+}
+
+void RTW88PCIDevice::postWakeResetFired(IOTimerEventSource *src)
+{
+    if (!_postWakeResetPending)
+        return;
+
+    _postWakeResetPending = false;
+    if (_systemSleeping || !_enabled || _resetInProgress)
+        return;
+
+    rtw88_diag_log("rtw88: post-wake 5s stabilising full reset\n");
+    IOReturn ret = resetWireless();
+    if (ret != kIOReturnSuccess)
+        rtw88_diag_log("rtw88: post-wake full reset failed: 0x%08x\n", ret);
 }
 
 void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 {
     unsigned int avail = rtw88_be_tx_avail();
 
-    if (_postWakeHealthTicks && !_systemSleeping && _enabled) {
-        _postWakeHealthTicks--;
+    /* Permanent awake-only dead-card watchdog.
+     *
+     * Immediate poison signature: the exact 0xeaeaeaea/0xeaea MMIO values
+     * observed after the failing sleep cycle.
+     *
+     * Progressive signature: packets are queued, software advances, the HW
+     * BE pointers remain frozen and no interrupt arrives for three samples.
+     * This catches a dead DMA engine before the BE ring fills to the old
+     * flow-control threshold. */
+    if (!_systemSleeping && _enabled && !_resetInProgress &&
+        !_postWakeResetPending) {
+        if (_deadCardCooldownTicks) {
+            _deadCardCooldownTicks--;
+            _deadCardConfirmTicks = 0;
+        } else {
+            struct rtw88_pci_health hs = {};
+            if (rtw88_get_pci_health(&hs)) {
+                UInt32 irqNow = _perfInterrupts;
+                bool poison =
+                    hs.txdma_status == 0xeaeaeaeaU ||
+                    (hs.pkt_empty == 0xeaeaU &&
+                     hs.hw_wp == 0 && hs.hw_rp == 0 &&
+                     hs.hisr0 == 0);
 
-        if (_txStalled && avail < kRTW88TxStallAvail)
-            _postWakeStallTicks++;
-        else
-            _postWakeStallTicks = 0;
+                bool queuedNoProgress =
+                    hs.qlen > 0 &&
+                    hs.hw_wp == _deadPrevHwWp &&
+                    hs.hw_rp == _deadPrevHwRp &&
+                    hs.sw_wp != _deadPrevSwWp &&
+                    irqNow == _deadPrevIrq;
 
-        if (_postWakeStallTicks >= 3 && !_autoWakeResetAttempted) {
-            _autoWakeResetAttempted = true;
-            _postWakeHealthTicks = 0;
-            rtw88_diag_log(
-                "rtw88: post-wake TX ring stalled for 3s (avail=%u); "
-                "automatic full reset\n", avail);
-            IOReturn ret = resetWireless();
-            if (ret != kIOReturnSuccess)
-                rtw88_diag_log(
-                    "rtw88: automatic post-wake reset failed: 0x%08x\n", ret);
-            src->setTimeoutMS(1000);
-            return;
+                if (poison)
+                    _deadCardConfirmTicks = 3;
+                else if (queuedNoProgress)
+                    _deadCardConfirmTicks++;
+                else
+                    _deadCardConfirmTicks = 0;
+
+                _deadPrevHwWp = hs.hw_wp;
+                _deadPrevHwRp = hs.hw_rp;
+                _deadPrevSwWp = hs.sw_wp;
+                _deadPrevIrq = irqNow;
+
+                if (_deadCardConfirmTicks >= 3) {
+                    rtw88_diag_log(
+                        "rtw88: DEAD_CARD detected txdma=0x%08x empty=0x%04x "
+                        "hw=%u/%u sw=%u/%u qlen=%u irq=%u; full reset\n",
+                        hs.txdma_status, hs.pkt_empty,
+                        hs.hw_wp, hs.hw_rp, hs.sw_wp, hs.sw_rp,
+                        hs.qlen, irqNow);
+
+                    _deadCardConfirmTicks = 0;
+                    _deadCardCooldownTicks = 10;
+                    IOReturn ret = resetWireless();
+                    if (ret != kIOReturnSuccess)
+                        rtw88_diag_log(
+                            "rtw88: DEAD_CARD recovery failed: 0x%08x\n", ret);
+                    src->setTimeoutMS(1000);
+                    return;
+                }
+            }
         }
+    } else {
+        _deadCardConfirmTicks = 0;
     }
     if (_txStalled && avail >= kRTW88TxResumeAvail)
         resumeTxIfStalled();
@@ -620,6 +692,8 @@ void RTW88PCIDevice::teardown()
         _debugTimer->cancelTimeout();
     if (_wakeTimer)
         _wakeTimer->cancelTimeout();
+    if (_postWakeResetTimer)
+        _postWakeResetTimer->cancelTimeout();
     if (_intrSrc)
         _intrSrc->disable();
     if (_txQueue) {
@@ -636,6 +710,7 @@ void RTW88PCIDevice::teardown()
 
     if (_debugTimer) { _debugTimer->cancelTimeout(); _workLoop->removeEventSource(_debugTimer); _debugTimer->release(); _debugTimer = nullptr; }
     if (_wakeTimer)  { _wakeTimer->cancelTimeout();  _workLoop->removeEventSource(_wakeTimer);  _wakeTimer->release();  _wakeTimer = nullptr; }
+    if (_postWakeResetTimer) { _postWakeResetTimer->cancelTimeout(); _workLoop->removeEventSource(_postWakeResetTimer); _postWakeResetTimer->release(); _postWakeResetTimer = nullptr; }
     if (_intrSrc)  { _workLoop->removeEventSource(_intrSrc); _intrSrc->release();  _intrSrc = nullptr; }
     if (_cmdGate)  { _workLoop->removeEventSource(_cmdGate); _cmdGate->release();  _cmdGate = nullptr; }
     if (_txQueue)  { _txQueue->release();   _txQueue = nullptr; }
@@ -804,9 +879,12 @@ UInt32 RTW88PCIDevice::outputPacket(mbuf_t m, void *param)
         _txStalled = true;
         return kIOReturnOutputStall;
     }
+    UInt32 packetLen = (UInt32)mbuf_pkthdr_len(m);
     UInt32 ret = _ieee80211->outputPacket(m);
-    if (ret == kIOReturnOutputSuccess)
+    if (ret == kIOReturnOutputSuccess) {
         _perfTxSubmitted++;
+        _totalTxBytes += packetLen;
+    }
     return ret;
 }
 
@@ -820,6 +898,12 @@ void RTW88PCIDevice::resumeTxIfStalled()
         if (_txQueue)
             _txQueue->service(IOBasicOutputQueue::kServiceAsync);
     }
+}
+
+void RTW88PCIDevice::getCumulativeStats(UInt32 *txBytes, UInt32 *rxBytes) const
+{
+    if (txBytes) *txBytes = _totalTxBytes;
+    if (rxBytes) *rxBytes = _totalRxBytes;
 }
 
 IOReturn RTW88PCIDevice::getHardwareAddress(IOEthernetAddress *addr)
@@ -930,10 +1014,12 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
         if (_intrSrc)
             _intrSrc->disable();
 
+        if (_postWakeResetTimer)
+            _postWakeResetTimer->cancelTimeout();
+        _postWakeResetPending = false;
         _txStalled = false;
-        _postWakeHealthTicks = 0;
-        _postWakeStallTicks = 0;
-        _autoWakeResetAttempted = false;
+        _deadCardConfirmTicks = 0;
+        _deadCardCooldownTicks = 0;
         setLinkStatus(kIONetworkLinkValid);
         IOLog("rtw88: sleep hard-off complete (core/rings=%s)\n",
               sleepRet == kIOReturnSuccess ? "clean" : "error");
@@ -958,15 +1044,21 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
 
 IOReturn RTW88PCIDevice::resetWireless()
 {
-    IOLog("rtw88: manual full reset requested\n");
+    IOLog("rtw88: full reset requested\n");
 
     if (!_ieee80211 || !_pciDev)
         return kIOReturnNotReady;
-    if (_systemSleeping)
+    if (_systemSleeping || _resetInProgress)
         return kIOReturnBusy;
 
-    /* Block networking immediately so no new descriptors are submitted while
-     * the PCIe/ring state is being torn down and rebuilt. */
+    _resetInProgress = true;
+    _postWakeResetPending = false;
+    if (_postWakeResetTimer)
+        _postWakeResetTimer->cancelTimeout();
+
+    /* Block networking immediately.  forceReconnect=true preserves the
+     * current target even if a previous reconnect is stuck in AUTHENTICATING,
+     * so recovery can always start one fresh MLME attempt afterwards. */
     _systemSleeping = true;
     _resumeNetworkEnabled = _enabled;
 
@@ -978,9 +1070,7 @@ IOReturn RTW88PCIDevice::resetWireless()
         _wakeRecoveryAttempts = 0;
     }
 
-    /* Same strict sequence as system sleep: disconnect first, stop/flush
-     * host TX, stop the rtw88 core, then destroy all PCI DMA rings. */
-    _ieee80211->suspendForSleep();
+    _ieee80211->suspendForSleep(true);
 
     _enabled = false;
     if (_txQueue) {
@@ -993,10 +1083,12 @@ IOReturn RTW88PCIDevice::resetWireless()
     if (_intrSrc)
         _intrSrc->disable();
     _txStalled = false;
+
     if (offRet != kIOReturnSuccess) {
         _systemSleeping = false;
-        IOLog("rtw88: manual reset failed during core/ring stop (0x%08x)\n",
-              offRet);
+        _resetInProgress = false;
+        IOLog("rtw88: reset failed during core/ring stop (0x%08x)\n", offRet);
+        if (_debugTimer) _debugTimer->setTimeoutMS(1000);
         return offRet;
     }
 
@@ -1005,14 +1097,18 @@ IOReturn RTW88PCIDevice::resetWireless()
 
     if (!refreshBAR2Mapping()) {
         _systemSleeping = false;
-        IOLog("rtw88: manual reset failed: BAR2 remap\n");
+        _resetInProgress = false;
+        IOLog("rtw88: reset failed: BAR2 remap\n");
+        if (_debugTimer) _debugTimer->setTimeoutMS(1000);
         return kIOReturnIOError;
     }
 
     IOReturn ret = _ieee80211->resumeFromSleep();
     if (ret != kIOReturnSuccess) {
         _systemSleeping = false;
-        IOLog("rtw88: manual reset failed during core restart (0x%08x)\n", ret);
+        _resetInProgress = false;
+        IOLog("rtw88: reset failed during core restart (0x%08x)\n", ret);
+        if (_debugTimer) _debugTimer->setTimeoutMS(1000);
         return ret;
     }
 
@@ -1025,10 +1121,17 @@ IOReturn RTW88PCIDevice::resetWireless()
     if (_resumeNetworkEnabled)
         _ieee80211->reconnectAfterWake();
 
+    _deadCardConfirmTicks = 0;
+    _deadCardCooldownTicks = 8;
+    _deadPrevHwWp = _deadPrevHwRp = _deadPrevSwWp = 0;
+    _deadPrevIrq = _perfInterrupts;
+
+    _resetInProgress = false;
+
     if (_debugTimer)
         _debugTimer->setTimeoutMS(1000);
 
-    IOLog("rtw88: manual full reset complete\n");
+    IOLog("rtw88: full reset complete\n");
     return kIOReturnSuccess;
 }
 
@@ -1114,6 +1217,7 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
 
     _perfRxPackets++;
     _perfRxBytes += (UInt32)plen;
+    _totalRxBytes += (UInt32)plen;
 
     IONetworkData *nd = _iface->getNetworkData(kIONetworkStatsKey);
     if (nd) {

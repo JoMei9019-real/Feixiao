@@ -911,15 +911,17 @@ void RTW88IEEE80211::powerOff()
     _powered = false;
 }
 
-void RTW88IEEE80211::suspendForSleep()
+void RTW88IEEE80211::suspendForSleep(bool forceReconnect)
 {
     if (_suspended)
         return;
 
     _resumeAfterWake =
-        (_state == RTW88_STATE_CONNECTED) ||
-        (_state == RTW88_STATE_SCANNING &&
-         _scanReturnState == RTW88_STATE_CONNECTED);
+        forceReconnect ?
+            (_targetBSS.ssid[0] != '\0') :
+            ((_state == RTW88_STATE_CONNECTED) ||
+             (_state == RTW88_STATE_SCANNING &&
+              _scanReturnState == RTW88_STATE_CONNECTED));
 
     IOLog("rtw88: IEEE80211 sleep hard-off (reconnect=%d)\n",
           _resumeAfterWake ? 1 : 0);
@@ -931,7 +933,11 @@ void RTW88IEEE80211::suspendForSleep()
 
     _manualScanAbort = true;
     if (_manualScanTC) thread_call_cancel(_manualScanTC);
-    if (_connectTC) thread_call_cancel(_connectTC);
+
+    /* Drain an already-running authentication worker before changing MLME,
+     * firmware or PCI state. A plain thread_call_cancel() only removes a
+     * pending invocation and was the source of the post-reset auth loop. */
+    cancelConnectWork(true);
 
     /* If we were associated, perform the normal local disconnect while
      * hardware/firmware are still running.  doDisconnect() sends a deauth,
@@ -1014,13 +1020,16 @@ void RTW88IEEE80211::reconnectAfterWake()
 
     /* Controller TX queue and interrupt source are live before this method is
      * called.  Start from IDLE and perform a complete auth/assoc/WPA exchange. */
+    cancelConnectWork(true);
+    if (_timer)
+        _timer->cancelTimeout();
+
     _state = RTW88_STATE_IDLE;
     _scanReturnState = RTW88_STATE_IDLE;
     IOLog("rtw88: reconnecting after wake to '%s'\n", _targetBSS.ssid);
 
     _state = RTW88_STATE_AUTHENTICATING;
-    if (_connectTC)
-        thread_call_enter(_connectTC);
+    scheduleConnectWork();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2386,14 +2395,28 @@ IOReturn RTW88IEEE80211::cmdConnect(const char *ssid, const char *password)
         return kIOReturnUnsupported;
     }
 
+    cancelConnectWork(true);
     _state = RTW88_STATE_AUTHENTICATING;
 
-    /* Run doAuthenticate on a background thread_call so the IOUserClient
-     * call returns immediately.  The connect machinery (channel change,
-     * mutex acquisition, TX) must not block the MIG thread. */
+    /* Exactly one authentication worker may exist for an attempt. */
+    scheduleConnectWork();
+    return kIOReturnSuccess;
+}
+
+void RTW88IEEE80211::cancelConnectWork(bool wait)
+{
+    if (!_connectTC)
+        return;
+    if (wait)
+        thread_call_cancel_wait(_connectTC);
+    else
+        thread_call_cancel(_connectTC);
+}
+
+void RTW88IEEE80211::scheduleConnectWork()
+{
     if (_connectTC)
         thread_call_enter(_connectTC);
-    return kIOReturnSuccess;
 }
 
 void RTW88IEEE80211::connectTCFn(thread_call_param_t self, thread_call_param_t)
@@ -2851,7 +2874,17 @@ bool RTW88IEEE80211::buildAssocReq(uint8_t *buf, uint32_t *len)
 
 IOReturn RTW88IEEE80211::cmdDisconnect()
 {
-    if (_state == RTW88_STATE_IDLE) return kIOReturnSuccess;
+    /* A manual disconnect is authoritative: no stale authentication worker
+     * may switch the state back to AUTHENTICATING afterwards. */
+    cancelConnectWork(true);
+    if (_timer)
+        _timer->cancelTimeout();
+
+    if (_state == RTW88_STATE_IDLE) {
+        _scanReturnState = RTW88_STATE_IDLE;
+        return kIOReturnSuccess;
+    }
+
     doDisconnect();
     return kIOReturnSuccess;
 }
@@ -3903,7 +3936,12 @@ IOReturn RTW88IEEE80211::cmdGetState(struct RTW88StateResult *result)
 
     rtw88_get_fw_version(_rtwdev, &result->fw_version, &result->fw_sub_version);
     rtw88_get_chip_name(_rtwdev, result->chip_name, sizeof(result->chip_name));
-    rtw88_get_stats(_rtwdev, &result->tx_byte_count, &result->rx_byte_count);
+    if (_parent)
+        _parent->getCumulativeStats(&result->tx_byte_count,
+                                    &result->rx_byte_count);
+    else
+        rtw88_get_stats(_rtwdev, &result->tx_byte_count,
+                        &result->rx_byte_count);
     result->scan_offload_supported =
         (_hw && _hw->ops && _hw->ops->hw_scan &&
          rtw88_hw_scan_supported(_hw)) ? 1 : 0;

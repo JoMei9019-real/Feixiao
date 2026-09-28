@@ -532,3 +532,24 @@ by the individual source files.
 Development 1.2 uses a strict sleep/wake DMA lifecycle: the normal disconnect is attempted while firmware is live, the host TX queue is stopped and flushed, rtw88 is stopped, and all PCI TX/RX rings are destroyed before sleep. On wake BAR2 is remapped, fresh PCI rings are allocated and the BE ring is validated as `wp=0/rp=0/qlen=0` before the core starts. IRQ is enabled before the host TX queue, and reconnect runs last.
 
 For the first 15 seconds after wake, a post-wake TX health watch detects a BE flow-control stall. Three consecutive stalled seconds trigger one automatic full reset. The manual `rtw88ctl reset` command remains available as a recovery/debug tool.
+
+
+### Development 1.3 recovery
+
+Development 1.3 builds on the 1.2 hard sleep/wake DMA lifecycle and adds the
+runtime recovery mechanisms validated by the RTL8821CE sleep tests:
+
+- exactly one authentication worker is allowed at a time; disconnect/reset
+  synchronously drains stale connect work before starting a new attempt;
+- a one-shot full PCI/DMA/firmware reset runs five seconds after a successful
+  platform wake when Wi-Fi was enabled;
+- an awake-only dead-card watchdog detects the observed poisoned MMIO signature
+  (`TXDMA_ST=0xeaeaeaea` / `PKT_EMPTY=0xeaea`) and also detects queued TX
+  with frozen hardware pointers and no interrupts;
+- automatic recovery uses the same full reset path as `rtw88ctl reset`;
+- `rtw88ctl status` now reports monotonic driver-side TX/RX byte counters
+  rather than the short-window rtw88 PHY statistics that are periodically
+  cleared for firmware feedback.
+
+The dead-card watchdog is disabled while the machine is asleep and while a
+reset or post-wake recovery is in progress.

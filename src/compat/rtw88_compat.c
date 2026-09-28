@@ -1215,6 +1215,27 @@ extern void rtw88_get_be_ring_state(struct rtw_dev *rtwdev,
  *   3) IRQ pending but masked: BEDOK_pending=1 AND BEDOK_masked=1
  *   4) ring desync: hw_rp > hw_wp (chip consumed more than submitted)
  */
+bool rtw88_get_pci_health(struct rtw88_pci_health *out)
+{
+    if (!out || !g_irq_dev_id)
+        return false;
+
+    struct rtw_dev *rtwdev = (struct rtw_dev *)g_irq_dev_id;
+    u32 bd_idx = rtw_read32(rtwdev, RTW88_DBG_RTK_PCI_TXBD_IDX_BEQ);
+    u32 rxbd = rtw_read32(rtwdev, RTW88_DBG_REG_RXBD_IDX_MPDUQ);
+
+    memset(out, 0, sizeof(*out));
+    out->hw_wp = bd_idx & RTW88_DBG_TRX_BD_IDX_MASK;
+    out->hw_rp = (bd_idx >> 16) & RTW88_DBG_TRX_BD_IDX_MASK;
+    rtw88_get_be_ring_state(rtwdev, &out->sw_wp, &out->sw_rp, &out->qlen);
+    out->txdma_status = rtw_read32(rtwdev, RTW88_DBG_REG_TXDMA_STATUS);
+    out->pkt_empty = rtw_read16(rtwdev, RTW88_DBG_REG_TXPKT_EMPTY);
+    out->rx_rp = rxbd & RTW88_DBG_TRX_BD_IDX_MASK;
+    out->rx_hw_wp = (rxbd >> 16) & RTW88_DBG_TRX_BD_IDX_MASK;
+    out->hisr0 = rtw_read32(rtwdev, RTW88_DBG_RTK_PCI_HISR0);
+    return true;
+}
+
 void rtw88_debug_dump_tx_state(void)
 {
     if (!g_irq_dev_id) return;
