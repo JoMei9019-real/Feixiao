@@ -73,6 +73,9 @@ public:
                            UInt32 type, OSDictionary *properties,
                            IOUserClient **handler) override;
 
+    /* Full runtime recovery used by rtw88ctl reset. */
+    IOReturn resetWireless();
+
     /* Called from interrupt handler */
     void handleInterrupt(IOInterruptEventSource *src, int count);
 
