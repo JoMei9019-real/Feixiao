@@ -29,6 +29,7 @@ enum {
     kRTW88SetRateMode = 10,
     kRTW88SetDiag     = 11,
     kRTW88GetVersion  = 12,
+    kRTW88Reset       = 13,
 };
 
 struct RTW88ConnectArgs {
@@ -374,6 +375,19 @@ static int cmd_power(io_connect_t conn, int on)
     return 0;
 }
 
+static int cmd_reset(io_connect_t conn)
+{
+    printf("Resetting Wi-Fi adapter...\n");
+    kern_return_t kr = IOConnectCallStructMethod(conn, kRTW88Reset,
+                                                  NULL, 0, NULL, NULL);
+    if (kr != KERN_SUCCESS) {
+        fprintf(stderr, "rtw88ctl: reset failed: %s\n", mach_error_string(kr));
+        return 1;
+    }
+    printf("Wi-Fi adapter reset complete.\n");
+    return 0;
+}
+
 static int cmd_version(io_connect_t conn)
 {
     printf("rtw88ctl:    %s\n", RTW88_BUILD_LABEL);
@@ -417,6 +431,7 @@ static void usage(const char *argv0)
         "  connect <ssid> [pass]    Connect to a network\n"
         "  disconnect               Disconnect\n"
         "  power on|off             Toggle IEEE80211 radio power\n"
+        "  reset                    Full PCI/DMA/firmware Wi-Fi reset\n"
         "  status                   Show current connection status\n"
         "  version                  Show rtw88ctl and loaded driver version\n"
         "  log                      Dump driver log buffer\n"
@@ -492,6 +507,9 @@ int main(int argc, char *argv[])
         } else {
             ret = cmd_power(conn, strcmp(argv[2], "on") == 0);
         }
+
+    } else if (strcmp(cmd, "reset") == 0) {
+        ret = cmd_reset(conn);
 
     } else if (strcmp(cmd, "status") == 0) {
         ret = cmd_status(conn);
