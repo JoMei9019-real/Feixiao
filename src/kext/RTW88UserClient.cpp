@@ -60,6 +60,9 @@ const IOExternalMethodDispatch RTW88UserClient::sMethods[kRTW88NumSelectors] = {
     /* kRTW88GetVersion: output struct = RTW88VersionResult */
     { (IOExternalMethodAction)&RTW88UserClient::sGetVersion,
       0, 0, 0, sizeof(RTW88VersionResult) },
+    /* kRTW88Reset: full in-driver PCI/DMA/firmware reset */
+    { (IOExternalMethodAction)&RTW88UserClient::sReset,
+      0, 0, 0, 0 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -315,4 +318,13 @@ IOReturn RTW88UserClient::sGetVersion(RTW88UserClient *uc, void *ref,
         rtw88_beta16_diag_is_enabled() ? 1 : 0;
     args->structureOutputSize = sizeof(*result);
     return kIOReturnSuccess;
+}
+
+
+IOReturn RTW88UserClient::sReset(RTW88UserClient *uc, void *ref,
+                                 IOExternalMethodArguments *args)
+{
+    if (!uc || !uc->_provider)
+        return kIOReturnOffline;
+    return uc->_provider->resetWireless();
 }
