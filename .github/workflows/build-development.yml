@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: feixiao-development-build
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
