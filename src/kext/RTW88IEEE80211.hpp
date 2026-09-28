@@ -95,6 +95,8 @@ public:
     void      handleInterrupt();
     UInt32    outputPacket(mbuf_t m);
     void      getMACAddress(uint8_t *mac);
+    RTW88State currentState() const { return _state; }
+    void      abortConnectionAttempt();
 
     /* Called from compat layer (ieee80211_rx_irqsafe) */
     void      rxFrame(struct sk_buff *skb);

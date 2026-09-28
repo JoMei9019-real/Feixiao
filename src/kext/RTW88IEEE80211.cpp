@@ -2889,6 +2889,23 @@ IOReturn RTW88IEEE80211::cmdDisconnect()
     return kIOReturnSuccess;
 }
 
+void RTW88IEEE80211::abortConnectionAttempt()
+{
+    cancelConnectWork(true);
+    if (_timer)
+        _timer->cancelTimeout();
+
+    if (_state == RTW88_STATE_SCANNING)
+        abortActiveScan(true);
+
+    if (_state != RTW88_STATE_IDLE)
+        doDisconnect();
+
+    _state = RTW88_STATE_IDLE;
+    _scanReturnState = RTW88_STATE_IDLE;
+}
+
+
 IOReturn RTW88IEEE80211::cmdPowerOn()
 {
     IOReturn ret = powerOn();

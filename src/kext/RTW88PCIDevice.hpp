@@ -142,6 +142,7 @@ private:
     void debugTimerFired(IOTimerEventSource *src);
     void wakeRecoveryFired(IOTimerEventSource *src);
     void postWakeResetFired(IOTimerEventSource *src);
+    void delayedReconnectFired(IOTimerEventSource *src);
 
     IOPCIDevice            *_pciDev       = nullptr;
     IOMemoryMap            *_mmioMap      = nullptr;
@@ -152,6 +153,7 @@ private:
     IOTimerEventSource     *_debugTimer   = nullptr;
     IOTimerEventSource     *_wakeTimer    = nullptr;
     IOTimerEventSource     *_postWakeResetTimer = nullptr;
+    IOTimerEventSource     *_reconnectTimer = nullptr;
     IOEthernetInterface    *_iface        = nullptr;
     IOGatedOutputQueue     *_txQueue      = nullptr;
     bool                    _rxQueued      = false;
@@ -170,6 +172,9 @@ private:
     UInt32                  _wakeRecoveryAttempts = 0;
     bool                    _postWakeResetPending = false;
     bool                    _resetInProgress = false;
+    bool                    _reconnectPending = false;
+    UInt32                  _authLoopTicks = 0;
+    UInt32                  _authRecoveryCount = 0;
     UInt32                  _deadCardConfirmTicks = 0;
     UInt32                  _deadCardCooldownTicks = 0;
     UInt32                  _deadPrevHwWp = 0;

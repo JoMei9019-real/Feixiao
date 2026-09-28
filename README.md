@@ -553,3 +553,21 @@ runtime recovery mechanisms validated by the RTL8821CE sleep tests:
 
 The dead-card watchdog is disabled while the machine is asleep and while a
 reset or post-wake recovery is in progress.
+
+
+### Development 1.4 auth-loop recovery
+
+Development 1.4 separates hardware recovery from association recovery. A full
+reset now restarts PCI/DMA/firmware but deliberately leaves the MLME idle for
+3.5 seconds before one reconnect attempt is started. This matches the manual
+disconnect/wait/reconnect sequence that proved stable during RTL8821CE testing.
+
+The awake-only health monitor also detects an authentication loop. If the
+driver remains in `AUTHENTICATING` for 10 consecutive seconds while no reset
+or delayed reconnect is active, it performs a full reset and then uses the
+same 3.5-second delayed reconnect. To prevent reset storms, at most two
+consecutive auth-loop recoveries are attempted; persistent failure is left in
+a clean IDLE state.
+
+The existing PCI/MMIO dead-card detector and five-second post-wake stabilising
+reset remain enabled.
