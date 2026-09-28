@@ -914,6 +914,74 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
     return IOPMAckImplied;
 }
 
+IOReturn RTW88PCIDevice::resetWireless()
+{
+    IOLog("rtw88: manual full reset requested\n");
+
+    if (!_ieee80211 || !_pciDev)
+        return kIOReturnNotReady;
+    if (_systemSleeping)
+        return kIOReturnBusy;
+
+    /* Block networking immediately so no new descriptors are submitted while
+     * the PCIe/ring state is being torn down and rebuilt. */
+    _systemSleeping = true;
+    _resumeNetworkEnabled = _enabled;
+
+    if (_debugTimer)
+        _debugTimer->cancelTimeout();
+    if (_wakeTimer) {
+        _wakeTimer->cancelTimeout();
+        _wakeRecoveryPending = false;
+        _wakeRecoveryAttempts = 0;
+    }
+
+    /* Preserve the existing target credentials through suspendForSleep().
+     * If the state machine believes it is connected, reconnectAfterWake()
+     * will establish a completely fresh auth/assoc/WPA session afterwards. */
+    _ieee80211->suspendForSleep();
+
+    _enabled = false;
+    if (_intrSrc)
+        _intrSrc->disable();
+    if (_txQueue) {
+        _txQueue->stop();
+        _txQueue->flush();
+    }
+    _txStalled = false;
+
+    _pciDev->setMemoryEnable(true);
+    _pciDev->setBusMasterEnable(true);
+
+    if (!refreshBAR2Mapping()) {
+        _systemSleeping = false;
+        IOLog("rtw88: manual reset failed: BAR2 remap\n");
+        return kIOReturnIOError;
+    }
+
+    IOReturn ret = _ieee80211->resumeFromSleep();
+    if (ret != kIOReturnSuccess) {
+        _systemSleeping = false;
+        IOLog("rtw88: manual reset failed during core restart (0x%08x)\n", ret);
+        return ret;
+    }
+
+    _enabled = true;
+    if (_txQueue) _txQueue->start();
+    if (_intrSrc) _intrSrc->enable();
+
+    _systemSleeping = false;
+
+    if (_resumeNetworkEnabled)
+        _ieee80211->reconnectAfterWake();
+
+    if (_debugTimer)
+        _debugTimer->setTimeoutMS(1000);
+
+    IOLog("rtw88: manual full reset complete\n");
+    return kIOReturnSuccess;
+}
+
 bool RTW88PCIDevice::refreshBAR2Mapping()
 {
     if (!_pciDev)
