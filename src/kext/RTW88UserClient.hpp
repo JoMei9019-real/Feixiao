@@ -27,6 +27,7 @@ enum RTW88UserClientSelector {
     kRTW88SetRateMode = 10,
     kRTW88SetDiag     = 11,
     kRTW88GetVersion  = 12,
+    kRTW88Reset       = 13,
     kRTW88NumSelectors
 };
 
@@ -100,6 +101,8 @@ private:
                              IOExternalMethodArguments *args);
     static IOReturn sGetVersion(RTW88UserClient *target, void *ref,
                                 IOExternalMethodArguments *args);
+    static IOReturn sReset(RTW88UserClient *target, void *ref,
+                           IOExternalMethodArguments *args);
 
     static const IOExternalMethodDispatch sMethods[kRTW88NumSelectors];
 
