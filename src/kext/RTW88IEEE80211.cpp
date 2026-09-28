@@ -951,10 +951,26 @@ void RTW88IEEE80211::suspendForSleep()
         _state = RTW88_STATE_IDLE;
     }
 
-    /* Same hardware transition used by Wi-Fi power-off.  Keep the saved
-     * target/password only for a later fresh association. */
-    powerOff();
+    /* Development 1.2: the parent must stop/flush the macOS TX queue
+     * before rtw_core_stop().  Mark the MLME suspended here, but deliberately
+     * leave the core powered until finishSleepPowerOff() is called. */
     _suspended = true;
+}
+
+IOReturn RTW88IEEE80211::finishSleepPowerOff()
+{
+    if (!_suspended)
+        return kIOReturnNotReady;
+
+    powerOff();
+
+    int pciRet = rtw88_macos_pci_sleep_deinit(_rtwdev);
+    if (pciRet) {
+        IOLog("rtw88: sleep PCI ring teardown failed: %d\n", pciRet);
+        return kIOReturnError;
+    }
+
+    return kIOReturnSuccess;
 }
 
 IOReturn RTW88IEEE80211::resumeFromSleep()
@@ -967,9 +983,9 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
     /* System sleep can invalidate the PCIe DMA/ring state even though the
      * software rtw_dev survives.  Recreate all TX/RX rings and mappings before
      * rtw_core_start() programs them back into the chip. */
-    int pciRet = rtw88_macos_pci_reinit(_rtwdev);
+    int pciRet = rtw88_macos_pci_wake_init(_rtwdev);
     if (pciRet) {
-        IOLog("rtw88: wake PCI ring reinit failed: %d\n", pciRet);
+        IOLog("rtw88: wake PCI ring init/validation failed: %d\n", pciRet);
         return kIOReturnError;
     }
 

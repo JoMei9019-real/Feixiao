@@ -163,6 +163,9 @@ private:
     bool                    _resumeNetworkEnabled = false;
     bool                    _wakeRecoveryPending = false;
     UInt32                  _wakeRecoveryAttempts = 0;
+    UInt32                  _postWakeHealthTicks = 0;
+    UInt32                  _postWakeStallTicks = 0;
+    bool                    _autoWakeResetAttempted = false;
 
     /* TX flow control: set when outputPacket() stalls the gated queue because
      * the BE ring is nearly full; cleared when the IRQ completion path frees

@@ -496,8 +496,10 @@ void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
 
     if (_resumeNetworkEnabled) {
         _enabled = true;
-        if (_txQueue) _txQueue->start();
+        /* Core/rings are fully initialized before host traffic is exposed.
+         * IRQ first, TX queue second, reconnect last. */
         if (_intrSrc) _intrSrc->enable();
+        if (_txQueue) _txQueue->start();
     }
 
     _systemSleeping = false;
@@ -505,15 +507,44 @@ void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
     if (_resumeNetworkEnabled && _ieee80211)
         _ieee80211->reconnectAfterWake();
 
+    /* Watch the first 15 seconds after wake.  Three consecutive seconds of
+     * flow-control stall trigger exactly one automatic full reset. */
+    _postWakeHealthTicks = 15;
+    _postWakeStallTicks = 0;
+    _autoWakeResetAttempted = false;
+
     if (_debugTimer)
         _debugTimer->setTimeoutMS(1000);
 
-    IOLog("rtw88: deferred wake recovery complete\n");
+    IOLog("rtw88: deferred wake recovery complete; TX health watch armed\n");
 }
 
 void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 {
     unsigned int avail = rtw88_be_tx_avail();
+
+    if (_postWakeHealthTicks && !_systemSleeping && _enabled) {
+        _postWakeHealthTicks--;
+
+        if (_txStalled && avail < kRTW88TxStallAvail)
+            _postWakeStallTicks++;
+        else
+            _postWakeStallTicks = 0;
+
+        if (_postWakeStallTicks >= 3 && !_autoWakeResetAttempted) {
+            _autoWakeResetAttempted = true;
+            _postWakeHealthTicks = 0;
+            rtw88_diag_log(
+                "rtw88: post-wake TX ring stalled for 3s (avail=%u); "
+                "automatic full reset\n", avail);
+            IOReturn ret = resetWireless();
+            if (ret != kIOReturnSuccess)
+                rtw88_diag_log(
+                    "rtw88: automatic post-wake reset failed: 0x%08x\n", ret);
+            src->setTimeoutMS(1000);
+            return;
+        }
+    }
     if (_txStalled && avail >= kRTW88TxResumeAvail)
         resumeTxIfStalled();
     if (_txStalled || avail < kRTW88TxStallAvail)
@@ -878,23 +909,34 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
         if (_debugTimer)
             _debugTimer->cancelTimeout();
 
-        /* 1.1.0 development: treat system sleep as a real Wi-Fi OFF event.
-         * First disconnect and stop rtw88 while the controller is still live,
-         * then put the controller itself into the disabled state. */
+        /* Development 1.2 strict sleep order:
+         *  1. normal MLME disconnect while TX/IRQ are alive
+         *  2. stop + flush the macOS output queue
+         *  3. rtw_core_stop()
+         *  4. destroy every PCI TX/RX ring and queued skb
+         * Nothing from the old DMA descriptor state survives sleep. */
         if (_ieee80211)
             _ieee80211->suspendForSleep();
 
         _enabled = false;
-        if (_intrSrc)
-            _intrSrc->disable();
         if (_txQueue) {
             _txQueue->stop();
             _txQueue->flush();
         }
+        drainPendingFree();
+
+        IOReturn sleepRet = _ieee80211 ?
+            _ieee80211->finishSleepPowerOff() : kIOReturnNotReady;
+        if (_intrSrc)
+            _intrSrc->disable();
 
         _txStalled = false;
+        _postWakeHealthTicks = 0;
+        _postWakeStallTicks = 0;
+        _autoWakeResetAttempted = false;
         setLinkStatus(kIONetworkLinkValid);
-        IOLog("rtw88: sleep hard-off complete\n");
+        IOLog("rtw88: sleep hard-off complete (core/rings=%s)\n",
+              sleepRet == kIOReturnSuccess ? "clean" : "error");
         return IOPMAckImplied;
     }
 
@@ -936,19 +978,27 @@ IOReturn RTW88PCIDevice::resetWireless()
         _wakeRecoveryAttempts = 0;
     }
 
-    /* Preserve the existing target credentials through suspendForSleep().
-     * If the state machine believes it is connected, reconnectAfterWake()
-     * will establish a completely fresh auth/assoc/WPA session afterwards. */
+    /* Same strict sequence as system sleep: disconnect first, stop/flush
+     * host TX, stop the rtw88 core, then destroy all PCI DMA rings. */
     _ieee80211->suspendForSleep();
 
     _enabled = false;
-    if (_intrSrc)
-        _intrSrc->disable();
     if (_txQueue) {
         _txQueue->stop();
         _txQueue->flush();
     }
+    drainPendingFree();
+
+    IOReturn offRet = _ieee80211->finishSleepPowerOff();
+    if (_intrSrc)
+        _intrSrc->disable();
     _txStalled = false;
+    if (offRet != kIOReturnSuccess) {
+        _systemSleeping = false;
+        IOLog("rtw88: manual reset failed during core/ring stop (0x%08x)\n",
+              offRet);
+        return offRet;
+    }
 
     _pciDev->setMemoryEnable(true);
     _pciDev->setBusMasterEnable(true);
@@ -967,8 +1017,8 @@ IOReturn RTW88PCIDevice::resetWireless()
     }
 
     _enabled = true;
-    if (_txQueue) _txQueue->start();
     if (_intrSrc) _intrSrc->enable();
+    if (_txQueue) _txQueue->start();
 
     _systemSleeping = false;
 

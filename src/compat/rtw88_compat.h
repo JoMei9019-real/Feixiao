@@ -236,6 +236,7 @@ int rtw88_beta16_set_rate_mode(int mode);
 int rtw88_beta16_set_diag_enabled(int enabled);
 int rtw88_beta16_diag_is_enabled(void);
 bool rtw88_beta16_tx_report_can_sample(struct rtw_dev *rtwdev);
-int rtw88_macos_pci_reinit(struct rtw_dev *rtwdev);
+int rtw88_macos_pci_sleep_deinit(struct rtw_dev *rtwdev);
+int rtw88_macos_pci_wake_init(struct rtw_dev *rtwdev);
 
 #endif /* _RTW88_COMPAT_H */

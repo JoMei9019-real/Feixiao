@@ -525,3 +525,10 @@ development cycle.
 
 Feixiao contains code under GPL-2.0 and BSD-compatible licensing as indicated
 by the individual source files.
+
+
+### Development 1.2 sleep/wake recovery
+
+Development 1.2 uses a strict sleep/wake DMA lifecycle: the normal disconnect is attempted while firmware is live, the host TX queue is stopped and flushed, rtw88 is stopped, and all PCI TX/RX rings are destroyed before sleep. On wake BAR2 is remapped, fresh PCI rings are allocated and the BE ring is validated as `wp=0/rp=0/qlen=0` before the core starts. IRQ is enabled before the host TX queue, and reconnect runs last.
+
+For the first 15 seconds after wake, a post-wake TX health watch detects a BE flow-control stall. Three consecutive stalled seconds trigger one automatic full reset. The manual `rtw88ctl reset` command remains available as a recovery/debug tool.

@@ -89,6 +89,7 @@ public:
     IOReturn  powerOn();     /* enable: rtw_core_start */
     void      powerOff();    /* disable: rtw_core_stop */
     void      suspendForSleep();
+    IOReturn  finishSleepPowerOff();
     IOReturn  resumeFromSleep();
     void      reconnectAfterWake();
     void      handleInterrupt();
