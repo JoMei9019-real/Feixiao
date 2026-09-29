@@ -69,25 +69,54 @@ jobs:
           test -x Feixiao/build/out/rtw88ctl
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
           test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.1.0"
-          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0 Development 1.5"
-          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 Development 1.5"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0 RC2"
+          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 RC2"
 
       - name: Package
         run: |
-          rm -rf Feixiao-1.1.0-Development-1.5
-          mkdir -p Feixiao-1.1.0-Development-1.5
-          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.1.0-Development-1.5/
-          cp Feixiao/build/out/rtw88ctl Feixiao-1.1.0-Development-1.5/
-          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.1.0-Development-1.5 Feixiao-1.1.0-Development-1.5.zip
-          shasum -a 256 Feixiao-1.1.0-Development-1.5.zip > Feixiao-1.1.0-Development-1.5.zip.sha256
+          rm -rf Feixiao-1.1.0-RC2
+          mkdir -p Feixiao-1.1.0-RC2
+          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.1.0-RC2/
+          cp Feixiao/build/out/rtw88ctl Feixiao-1.1.0-RC2/
+          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.1.0-RC2 Feixiao-1.1.0-RC2.zip
+          shasum -a 256 Feixiao-1.1.0-RC2.zip > Feixiao-1.1.0-RC2.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.1.0-Development-1.5
+          name: Feixiao-1.1.0-RC2
           path: |
-            Feixiao-1.1.0-Development-1.5.zip
-            Feixiao-1.1.0-Development-1.5.zip.sha256
+            Feixiao-1.1.0-RC2.zip
+            Feixiao-1.1.0-RC2.zip.sha256
+
+      - name: Publish 1.1.0 RC2 prerelease
+        if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'Feixiao 1.1.0 RC2' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0-rc.2
+          target_commitish: development
+          name: Feixiao 1.1.0 RC2
+          prerelease: true
+          body: |
+            ## Feixiao 1.1.0 RC2
+
+            RC2 promotes the tested **Development 1.5** code without functional changes.
+
+            ### Highlights
+            - hardened macOS sleep/wake PCI, BAR and DMA-ring lifecycle
+            - fresh PCI TX/RX rings after wake with BE ring validation
+            - one-shot five-second post-wake full hardware reset
+            - awake-only dead-card detection and automatic full reset
+            - authentication-loop detection with recovery to a clean IDLE state
+            - no automatic association/reconnect after recovery; reconnect policy is userspace-owned
+            - manual `rtw88ctl reset` remains available
+            - cumulative TX/RX byte reporting in `rtw88ctl status`
+            - validated RTL8821CE TX-STBC/rate-control fixes retained
+
+            This is a prerelease intended for a one-week stability test before 1.1.0 final.
+          files: |
+            Feixiao-1.1.0-RC2.zip
+            Feixiao-1.1.0-RC2.zip.sha256
 
       # Development pushes intentionally stop at the downloadable artifact.
       # A release candidate is published only after the sleep/wake build has
