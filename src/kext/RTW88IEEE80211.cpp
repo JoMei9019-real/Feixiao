@@ -923,7 +923,7 @@ void RTW88IEEE80211::suspendForSleep(bool forceReconnect)
              (_state == RTW88_STATE_SCANNING &&
               _scanReturnState == RTW88_STATE_CONNECTED));
 
-    IOLog("rtw88: IEEE80211 sleep hard-off (reconnect=%d)\n",
+    IOLog("rtw88: IEEE80211 sleep hard-off (had_active_target=%d)\n",
           _resumeAfterWake ? 1 : 0);
 
     if (_timer) _timer->cancelTimeout();
@@ -941,8 +941,8 @@ void RTW88IEEE80211::suspendForSleep(bool forceReconnect)
 
     /* If we were associated, perform the normal local disconnect while
      * hardware/firmware are still running.  doDisconnect() sends a deauth,
-     * clears association state and releases the STA, but intentionally keeps
-     * _targetBSS and _password so wake can establish a brand-new connection. */
+     * clears association state and releases the STA. _targetBSS/_password are
+     * retained only for userspace visibility; the kext does not reconnect. */
     if (_resumeAfterWake) {
         doDisconnect();
         /* Give the management TX completion path a short window before the
@@ -1001,36 +1001,17 @@ IOReturn RTW88IEEE80211::resumeFromSleep()
 
     _suspended = false;
     _manualScanAbort = false;
-    return kIOReturnSuccess;
-}
+    _resumeAfterWake = false;
 
-void RTW88IEEE80211::reconnectAfterWake()
-{
-    if (_suspended || !_powered)
-        return;
-
+    /* Housekeeping resumes on wake even though association recovery is now
+     * userspace-owned. */
     if (_rssiTimer)
         _rssiTimer->setTimeoutMS(2000);
 
-    bool reconnect = _resumeAfterWake && _targetBSS.ssid[0] != '\0';
-    _resumeAfterWake = false;
-
-    if (!reconnect)
-        return;
-
-    /* Controller TX queue and interrupt source are live before this method is
-     * called.  Start from IDLE and perform a complete auth/assoc/WPA exchange. */
-    cancelConnectWork(true);
-    if (_timer)
-        _timer->cancelTimeout();
-
-    _state = RTW88_STATE_IDLE;
-    _scanReturnState = RTW88_STATE_IDLE;
-    IOLog("rtw88: reconnecting after wake to '%s'\n", _targetBSS.ssid);
-
-    _state = RTW88_STATE_AUTHENTICATING;
-    scheduleConnectWork();
+    return kIOReturnSuccess;
 }
+
+
 
 /* ------------------------------------------------------------------ */
 /*  Interrupt dispatch                                                  */

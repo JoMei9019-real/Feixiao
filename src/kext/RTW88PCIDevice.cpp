@@ -436,13 +436,6 @@ bool RTW88PCIDevice::start(IOService *provider)
         return false;
     _workLoop->addEventSource(_postWakeResetTimer);
 
-    _reconnectTimer = IOTimerEventSource::timerEventSource(
-        this, OSMemberFunctionCast(IOTimerEventSource::Action,
-                                   this, &RTW88PCIDevice::delayedReconnectFired));
-    if (!_reconnectTimer)
-        return false;
-    _workLoop->addEventSource(_reconnectTimer);
-
     /* Register as an actual IOKit power driver.  Earlier builds only logged
      * powerStateWillChangeTo(), leaving the firmware running across sleep and
      * causing H2C failures after wake. */
@@ -511,15 +504,13 @@ void RTW88PCIDevice::wakeRecoveryFired(IOTimerEventSource *src)
     if (_resumeNetworkEnabled) {
         _enabled = true;
         /* Core/rings are fully initialized before host traffic is exposed.
-         * IRQ first, TX queue second, reconnect last. */
+         * IRQ first, TX queue second. Association is intentionally left to
+         * userspace (e.g. Starkiff). */
         if (_intrSrc) _intrSrc->enable();
         if (_txQueue) _txQueue->start();
     }
 
     _systemSleeping = false;
-
-    if (_resumeNetworkEnabled && _ieee80211)
-        _ieee80211->reconnectAfterWake();
 
     /* The RTL8821CE test system can wake cleanly and lose MMIO/DMA a few
      * seconds later.  Schedule one deliberate stabilising reset at +5s.
@@ -555,36 +546,17 @@ void RTW88PCIDevice::postWakeResetFired(IOTimerEventSource *src)
         rtw88_diag_log("rtw88: post-wake full reset failed: 0x%08x\n", ret);
 }
 
-void RTW88PCIDevice::delayedReconnectFired(IOTimerEventSource *src)
-{
-    if (!_reconnectPending)
-        return;
-
-    _reconnectPending = false;
-
-    if (_systemSleeping || !_enabled || _resetInProgress || !_ieee80211)
-        return;
-
-    /* Start from a clean MLME IDLE state.  Do not let a stale timeout or
-     * authentication worker survive into this fresh attempt. */
-    _ieee80211->abortConnectionAttempt();
-
-    rtw88_diag_log("rtw88: delayed reconnect after reset starting\n");
-    _ieee80211->reconnectAfterWake();
-}
-
-
 void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
 {
     unsigned int avail = rtw88_be_tx_avail();
 
     /* Development 1.4 MLME health watchdog.
      * A healthy PCIe device can still become stuck in AUTHENTICATING.  The
-     * normal auth timer used to retry forever.  Count consecutive seconds in
-     * that state and recover after 10 s.  Reset/reconnect timers suppress the
-     * check so intentional recovery cannot recursively trigger itself. */
+     * normal auth timer used to retry forever. Count consecutive seconds in
+     * that state and recover after 10 s. The reset ends in IDLE; userspace
+     * decides whether and when to reconnect. */
     if (!_systemSleeping && _enabled && !_resetInProgress &&
-        !_reconnectPending && !_postWakeResetPending && _ieee80211) {
+        !_postWakeResetPending && _ieee80211) {
         RTW88State st = _ieee80211->currentState();
 
         if (st == RTW88_STATE_CONNECTED) {
@@ -596,9 +568,8 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
             if (_authLoopTicks >= 10) {
                 _authLoopTicks = 0;
 
-                /* Avoid an uncontrolled reset storm.  Two automatic auth-loop
-                 * recoveries are allowed; after that leave the card cleanly
-                 * idle so the UI/user can initiate a fresh connection. */
+                /* Avoid an uncontrolled reset storm. Recovery itself never
+                 * reconnects; it only restores hardware and leaves MLME IDLE. */
                 if (_authRecoveryCount >= 2) {
                     rtw88_diag_log(
                         "rtw88: AUTH_LOOP persists after 2 recoveries; "
@@ -609,7 +580,7 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
                     _authRecoveryCount++;
                     rtw88_diag_log(
                         "rtw88: AUTH_LOOP detected (10s); full reset "
-                        "recovery=%u/2\n", _authRecoveryCount);
+                        "to IDLE recovery=%u/2\n", _authRecoveryCount);
 
                     IOReturn ret = resetWireless();
                     if (ret != kIOReturnSuccess)
@@ -636,7 +607,7 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
      * This catches a dead DMA engine before the BE ring fills to the old
      * flow-control threshold. */
     if (!_systemSleeping && _enabled && !_resetInProgress &&
-        !_postWakeResetPending && !_reconnectPending) {
+        !_postWakeResetPending) {
         if (_deadCardCooldownTicks) {
             _deadCardCooldownTicks--;
             _deadCardConfirmTicks = 0;
@@ -768,8 +739,6 @@ void RTW88PCIDevice::teardown()
         _wakeTimer->cancelTimeout();
     if (_postWakeResetTimer)
         _postWakeResetTimer->cancelTimeout();
-    if (_reconnectTimer)
-        _reconnectTimer->cancelTimeout();
     if (_intrSrc)
         _intrSrc->disable();
     if (_txQueue) {
@@ -787,7 +756,6 @@ void RTW88PCIDevice::teardown()
     if (_debugTimer) { _debugTimer->cancelTimeout(); _workLoop->removeEventSource(_debugTimer); _debugTimer->release(); _debugTimer = nullptr; }
     if (_wakeTimer)  { _wakeTimer->cancelTimeout();  _workLoop->removeEventSource(_wakeTimer);  _wakeTimer->release();  _wakeTimer = nullptr; }
     if (_postWakeResetTimer) { _postWakeResetTimer->cancelTimeout(); _workLoop->removeEventSource(_postWakeResetTimer); _postWakeResetTimer->release(); _postWakeResetTimer = nullptr; }
-    if (_reconnectTimer) { _reconnectTimer->cancelTimeout(); _workLoop->removeEventSource(_reconnectTimer); _reconnectTimer->release(); _reconnectTimer = nullptr; }
     if (_intrSrc)  { _workLoop->removeEventSource(_intrSrc); _intrSrc->release();  _intrSrc = nullptr; }
     if (_cmdGate)  { _workLoop->removeEventSource(_cmdGate); _cmdGate->release();  _cmdGate = nullptr; }
     if (_txQueue)  { _txQueue->release();   _txQueue = nullptr; }
@@ -1094,9 +1062,6 @@ IOReturn RTW88PCIDevice::setPowerState(unsigned long state, IOService *actor)
         if (_postWakeResetTimer)
             _postWakeResetTimer->cancelTimeout();
         _postWakeResetPending = false;
-        if (_reconnectTimer)
-            _reconnectTimer->cancelTimeout();
-        _reconnectPending = false;
         _authLoopTicks = 0;
         _txStalled = false;
         _deadCardConfirmTicks = 0;
@@ -1136,10 +1101,6 @@ IOReturn RTW88PCIDevice::resetWireless()
     _postWakeResetPending = false;
     if (_postWakeResetTimer)
         _postWakeResetTimer->cancelTimeout();
-    _reconnectPending = false;
-    if (_reconnectTimer)
-        _reconnectTimer->cancelTimeout();
-
     /* Block networking immediately.  forceReconnect=true preserves the
      * current target even if a previous reconnect is stuck in AUTHENTICATING,
      * so recovery can always start one fresh MLME attempt afterwards. */
@@ -1202,17 +1163,10 @@ IOReturn RTW88PCIDevice::resetWireless()
 
     _systemSleeping = false;
 
-    /* Development 1.4: reset and reconnect are deliberately separate.
-     * Leave the freshly restarted card idle for 3.5 seconds before the first
-     * authentication frame.  This mirrors the manual recovery that proved
-     * reliable on the test hardware. */
-    _reconnectPending = _resumeNetworkEnabled;
-    if (_reconnectPending && _reconnectTimer) {
-        _reconnectTimer->cancelTimeout();
-        _reconnectTimer->setTimeoutMS(3500);
-        IOLog("rtw88: delayed reconnect scheduled in 3500 ms\n");
-    }
-
+    /* Development 1.5: hardware recovery stops here.  No connection attempt
+     * is scheduled by the kext.  Keep the MLME cleanly IDLE and let userspace
+     * (for example Starkiff) decide when to reconnect. */
+    _ieee80211->abortConnectionAttempt();
     _authLoopTicks = 0;
 
     _deadCardConfirmTicks = 0;

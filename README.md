@@ -571,3 +571,20 @@ a clean IDLE state.
 
 The existing PCI/MMIO dead-card detector and five-second post-wake stabilising
 reset remain enabled.
+
+
+### Development 1.5 userspace-owned reconnect
+
+Development 1.5 removes automatic association/reconnect from all recovery
+paths. The kext still performs the full sleep/wake PCI-DMA lifecycle, the
+five-second post-wake stabilising reset, dead-card detection, authentication
+loop detection, and manual `rtw88ctl reset`.
+
+After any full reset or automatic recovery the driver now ends in a clean
+`IDLE` state and does not schedule a connection attempt. Network selection
+and reconnect timing are intentionally left to userspace (for example a
+future Starkiff customer build).
+
+The authentication-loop watchdog remains active: a connection attempt that
+stays in `AUTHENTICATING` for 10 seconds can still trigger a hardware reset,
+but that recovery ends in `IDLE` instead of reconnecting automatically.

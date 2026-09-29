@@ -91,7 +91,6 @@ public:
     void      suspendForSleep(bool forceReconnect = false);
     IOReturn  finishSleepPowerOff();
     IOReturn  resumeFromSleep();
-    void      reconnectAfterWake();
     void      handleInterrupt();
     UInt32    outputPacket(mbuf_t m);
     void      getMACAddress(uint8_t *mac);

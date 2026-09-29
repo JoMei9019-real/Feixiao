@@ -69,25 +69,25 @@ jobs:
           test -x Feixiao/build/out/rtw88ctl
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
           test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.1.0"
-          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0 Development 1.4"
-          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 Development 1.4"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0 Development 1.5"
+          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0 Development 1.5"
 
       - name: Package
         run: |
-          rm -rf Feixiao-1.1.0-Development-1.4
-          mkdir -p Feixiao-1.1.0-Development-1.4
-          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.1.0-Development-1.4/
-          cp Feixiao/build/out/rtw88ctl Feixiao-1.1.0-Development-1.4/
-          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.1.0-Development-1.4 Feixiao-1.1.0-Development-1.4.zip
-          shasum -a 256 Feixiao-1.1.0-Development-1.4.zip > Feixiao-1.1.0-Development-1.4.zip.sha256
+          rm -rf Feixiao-1.1.0-Development-1.5
+          mkdir -p Feixiao-1.1.0-Development-1.5
+          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.1.0-Development-1.5/
+          cp Feixiao/build/out/rtw88ctl Feixiao-1.1.0-Development-1.5/
+          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.1.0-Development-1.5 Feixiao-1.1.0-Development-1.5.zip
+          shasum -a 256 Feixiao-1.1.0-Development-1.5.zip > Feixiao-1.1.0-Development-1.5.zip.sha256
 
       - name: Upload development artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.1.0-Development-1.4
+          name: Feixiao-1.1.0-Development-1.5
           path: |
-            Feixiao-1.1.0-Development-1.4.zip
-            Feixiao-1.1.0-Development-1.4.zip.sha256
+            Feixiao-1.1.0-Development-1.5.zip
+            Feixiao-1.1.0-Development-1.5.zip.sha256
 
       # Development pushes intentionally stop at the downloadable artifact.
       # A release candidate is published only after the sleep/wake build has
