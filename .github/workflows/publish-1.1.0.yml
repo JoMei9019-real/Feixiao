@@ -1,0 +1,122 @@
+name: Publish Feixiao 1.1.0
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: feixiao-1.1.0-final
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Feixiao 1.1.0 Final' }}
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Feixiao
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: Feixiao
+
+      - name: Clone pinned rtw88-stable
+        run: |
+          git clone https://github.com/thegwchr/rtw88-stable.git
+          git -C rtw88-stable checkout d029a677c49266fad86750714eb5612becd134d3
+          test "$(git -C rtw88-stable rev-parse HEAD)" = "d029a677c49266fad86750714eb5612becd134d3"
+
+      - name: Apply shared TX/RA diagnostics
+        working-directory: Feixiao
+        run: python3 scripts/apply_beta7_tx_diag.py
+
+      - name: Apply stable RTL8821C TX fix
+        working-directory: Feixiao
+        run: python3 scripts/apply_beta16_ra_fix.py
+
+      - name: Apply macOS sleep/wake PCI ring reinit
+        working-directory: Feixiao
+        run: python3 scripts/apply_sleep_pci_reinit.py
+
+      - name: Download firmware blobs
+        run: |
+          cd Feixiao/firmware
+          for fw in rtw8822b_fw.bin rtw8822c_fw.bin rtw8821c_fw.bin \
+                    rtw8821a_fw.bin rtw8812a_fw.bin rtw8814a_fw.bin; do
+            if [ ! -s "$fw" ]; then
+              curl -fL --retry 3 -o "$fw" \
+                "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw"
+            fi
+          done
+
+      - name: Test peer aggregation parser
+        working-directory: Feixiao
+        run: |
+          xcrun clang++ -std=c++11 -fsanitize=address,undefined tests/peer_ampdu.cpp -o "$RUNNER_TEMP/peer-ampdu-test"
+          "$RUNNER_TEMP/peer-ampdu-test"
+
+      - name: Build
+        working-directory: Feixiao
+        run: make clean && make -j1 all
+
+      - name: Validate final build
+        run: |
+          test -f Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
+          test -x Feixiao/build/out/rtw88ctl
+          plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = "1.1.0"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildLabel)" = "1.1.0"
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" RTW88BuildChannel)" = "Stable"
+          Feixiao/build/out/rtw88ctl --version | grep -q "rtw88ctl:    1.1.0"
+
+      - name: Package
+        run: |
+          rm -rf Feixiao-1.1.0
+          mkdir -p Feixiao-1.1.0
+          cp -R Feixiao/build/out/rtw88.kext Feixiao-1.1.0/
+          cp Feixiao/build/out/rtw88ctl Feixiao-1.1.0/
+          ditto -c -k --sequesterRsrc --keepParent Feixiao-1.1.0 Feixiao-1.1.0.zip
+          shasum -a 256 Feixiao-1.1.0.zip > Feixiao-1.1.0.zip.sha256
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feixiao-1.1.0
+          path: |
+            Feixiao-1.1.0.zip
+            Feixiao-1.1.0.zip.sha256
+
+      - name: Publish stable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0
+          target_commitish: main
+          name: Feixiao 1.1.0
+          prerelease: false
+          body: |
+            ## Feixiao 1.1.0
+
+            Stable release promoted from the tested 1.1.0 RC2 codebase with no functional driver changes after RC2.
+
+            ### Highlights
+            - hardened macOS sleep/wake PCI, BAR and DMA-ring lifecycle
+            - fresh PCI TX/RX rings after wake with validation
+            - one-shot five-second post-wake full hardware reset
+            - awake-only dead-card detection and automatic full reset
+            - authentication-loop detection with recovery to a clean IDLE state
+            - reconnect policy intentionally owned by userspace; the kext does not auto-associate after recovery
+            - manual `rtw88ctl reset` recovery command
+            - cumulative TX/RX byte reporting in `rtw88ctl status`
+            - firmware automatic rate adaptation with the validated RTL8821CE TX-STBC fix
+            - WPA duplicate-Message-3 handling and AP disconnect cleanup
+            - diagnostics remain opt-in and rate-limited
+
+            RTL8821CE is the primary validated chipset for the 1.1.0 release.
+          files: |
+            Feixiao-1.1.0.zip
+            Feixiao-1.1.0.zip.sha256

@@ -3,13 +3,11 @@
 Feixiao is an open-source macOS kernel extension that ports the Linux `rtw88`
 driver to macOS and provides Wi-Fi support for selected Realtek PCIe adapters.
 
-The current development release is **Feixiao 1.1.0 RC2**. The 1.1.0 series
+The current stable release is **Feixiao 1.1.0**. The 1.1.0 series
 contains major stability, WPA, receive-path and transmit-rate-control fixes.
 The current RC has been validated primarily on **RTL8821CE**.
 
-> **Release status:** 1.1.0 RC2 is a release candidate. The validated Beta 16
-> data path is intentionally frozen; RC work is limited to release and
-> usability polishing unless a regression is discovered.
+> **Release status:** 1.1.0 is the stable release promoted from the RC2 codebase after the final validation period.
 
 ## Supported hardware
 
@@ -24,7 +22,7 @@ Feixiao currently targets these Realtek PCIe chipsets:
 ### Validation status
 
 RTL8821CE is currently the most extensively tested device. On that chipset,
-1.1.0 RC2 has been validated with 2.4 GHz and 5 GHz networking, 80 MHz VHT,
+1.1.0 has been validated with 2.4 GHz and 5 GHz networking, 80 MHz VHT,
 automatic firmware rate adaptation, WPA2, A-MPDU and runtime diagnostics.
 
 Support for the other listed PCIe chipsets remains part of the project, but
@@ -32,7 +30,7 @@ they have not received the same level of 1.1.0 RC validation.
 
 **USB and SDIO variants are currently unsupported and are not planned targets.**
 
-## What works in 1.1.0 RC2
+## What works in 1.1.0
 
 ### Wi-Fi and connection handling
 
@@ -92,7 +90,7 @@ hundreds-of-entry pending queue seen in earlier beta builds.
 
 ### Version matching
 
-1.1.0 RC2 includes:
+1.1.0 includes:
 
 ```sh
 rtw88ctl version
@@ -105,8 +103,8 @@ spot an old `rtw88ctl` binary being used with a newer Kext.
 Example:
 
 ```text
-rtw88ctl:    1.1.0 RC2
-Driver:      1.1.0 RC2
+rtw88ctl:    1.1.0
+Driver:      1.1.0
 Channel:     Release Candidate
 Diagnostics: off
 TX rate:     auto
@@ -315,7 +313,7 @@ rate.
 
 ## Recommended normal configuration
 
-For normal use with 1.1.0 RC2, no special command is required after boot.
+For normal use with 1.1.0, no special command is required after boot.
 
 The defaults are:
 
@@ -590,11 +588,10 @@ stays in `AUTHENTICATING` for 10 seconds can still trigger a hardware reset,
 but that recovery ends in `IDLE` instead of reconnecting automatically.
 
 
-### 1.1.0 RC2
+### 1.1.0 final
 
-RC2 is the release-candidate promotion of Development 1.5 with no functional
-driver changes between the tested development build and the RC. Recovery
-paths keep the PCI/DMA/firmware hardening, post-wake reset, dead-card watcher,
-authentication-loop recovery and cumulative status counters. Automatic
-association/reconnect is intentionally not performed by the kext; recovery
-ends in `IDLE` so userspace can decide when to reconnect.
+The final 1.1.0 release promotes the tested RC2 code without functional driver
+changes. Recovery paths keep the PCI/DMA/firmware hardening, post-wake reset,
+dead-card watcher, authentication-loop recovery and cumulative status counters.
+Automatic association/reconnect is intentionally not performed by the kext;
+recovery ends in `IDLE` so userspace can decide when to reconnect.
